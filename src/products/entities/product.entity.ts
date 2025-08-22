@@ -1,5 +1,5 @@
+import { OrderProduct } from 'src/orders/entities/order-product.entity';
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany } from 'typeorm';
-// import { OrderProduct } from '../../orders/entities/order-product.entity';
 
 @Entity('products')
 export class Product {
@@ -26,8 +26,8 @@ export class Product {
   @Column({ type: 'text', nullable: true })
   notes: string | null;
 
-//   @OneToMany(() => OrderProduct, (op) => op.product)
-//   orderProducts: OrderProduct[];
+  @OneToMany(() => OrderProduct, (op) => op.product)
+  orderProducts: OrderProduct[];
 
   @CreateDateColumn({ type: 'timestamp with time zone' })
   createdAt: Date;
