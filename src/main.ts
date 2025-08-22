@@ -2,6 +2,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { validationPipe } from './common/pipes/validation.pipe';
 import { AllExceptionsFilter } from './common/filters/all-exceptions.filter';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
@@ -20,6 +21,24 @@ async function bootstrap() {
 
   // Prefijo global para todas las rutas
   app.setGlobalPrefix('api/v1');
+
+  // Swagger/OpenAPI
+  const swaggerConfig = new DocumentBuilder()
+    .setTitle('Cano Distribuciones API')
+    .setDescription('Documentación de la API de Cano Distribuciones')
+    .setVersion('1.0')
+    .addBearerAuth(
+      { type: 'http', scheme: 'bearer', bearerFormat: 'JWT' },
+      'access-token',
+    )
+    .build();
+
+  const document = SwaggerModule.createDocument(app, swaggerConfig);
+  SwaggerModule.setup('api/v1/docs', app, document, {
+    swaggerOptions: {
+      persistAuthorization: true,
+    },
+  });
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
