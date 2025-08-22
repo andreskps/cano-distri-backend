@@ -19,6 +19,9 @@ export class OrderProduct {
   @Column({ type: 'numeric', precision: 14, scale: 2 })
   unitPrice: string;
 
+  @Column({ type: 'numeric', precision: 14, scale: 2 })
+  subtotal: string;
+
   @CreateDateColumn({ type: 'timestamp with time zone' })
   createdAt: Date;
 }

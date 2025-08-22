@@ -39,7 +39,7 @@ export class Order {
   @Column({ type: 'numeric', precision: 14, scale: 2, default: 0 })
   total: string;
 
-  @Column({ type: 'enum', enum: OrderStatus, default: OrderStatus.CONFIRMED })
+  @Column({ type: 'enum', enum: OrderStatus, default: OrderStatus.PENDING })
   status: OrderStatus;
 
   @Column({ type: 'boolean', default: false })

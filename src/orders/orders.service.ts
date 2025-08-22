@@ -1,26 +1,579 @@
-import { Injectable } from '@nestjs/common';
+import { 
+  Injectable, 
+  NotFoundException, 
+  BadRequestException, 
+  ForbiddenException 
+} from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository, Between, Like, DataSource } from 'typeorm';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
+import { GetOrdersQueryDto } from './dto/get-orders.dto';
+import { PaginatedResponseDto } from '../common/dto/pagination.dto';
+import { Order } from './entities/order.entity';
+import { OrderProduct } from './entities/order-product.entity';
+import { OrderStatusHistory } from './entities/order-status-history.entity';
+import { Product } from '../products/entities/product.entity';
+import { Customer } from '../customers/entities/customer.entity';
+import { User } from '../users/entities/user.entity';
+import { OrderStatus } from './entities/order-status.enum';
+import { UserRole } from '../users/entities/user.entity';
+import { OrderCodeService } from './services/order-code.service';
 
 @Injectable()
 export class OrdersService {
-  create(createOrderDto: CreateOrderDto) {
-    return 'This action adds a new order';
+  constructor(
+    @InjectRepository(Order)
+    private readonly orderRepository: Repository<Order>,
+    @InjectRepository(OrderProduct)
+    private readonly orderProductRepository: Repository<OrderProduct>,
+    @InjectRepository(OrderStatusHistory)
+    private readonly statusHistoryRepository: Repository<OrderStatusHistory>,
+    @InjectRepository(Product)
+    private readonly productRepository: Repository<Product>,
+    @InjectRepository(Customer)
+    private readonly customerRepository: Repository<Customer>,
+    private readonly orderCodeService: OrderCodeService,
+    private readonly dataSource: DataSource,
+  ) {}
+
+  async create(createOrderDto: CreateOrderDto, user: User): Promise<Order> {
+    // Validaciones previas fuera de la transacción
+    await this.validateOrderCreation(createOrderDto, user);
+
+    // Ejecutar toda la creación dentro de una transacción
+    return this.dataSource.transaction(async (manager) => {
+      try {
+        // Verificar que el cliente existe (dentro de la transacción)
+        const customer = await manager.findOne(Customer, {
+          where: { id: createOrderDto.customerId },
+          relations: ['seller'],
+        });
+
+        if (!customer) {
+          throw new NotFoundException('Cliente no encontrado');
+        }
+
+        // Verificar permisos de creación
+        if (user.role === UserRole.SELLER && customer.seller?.id !== user.id) {
+          throw new ForbiddenException('No tienes permiso para crear pedidos para este cliente');
+        }
+
+        // Generar código único para el pedido
+        const orderCode = await this.generateUniqueOrderCode(manager);
+
+        // Validar y obtener productos
+        const validatedProducts = await this.validateAndGetProducts(
+          createOrderDto.products, 
+          manager
+        );
+
+        // Crear el pedido
+        const order = manager.create(Order, {
+          code: orderCode,
+          customer,
+          user,
+          deliveryDate: createOrderDto.deliveryDate,
+          notes: createOrderDto.notes,
+          status: OrderStatus.PENDING,
+          total: '0',
+        });
+
+        const savedOrder = await manager.save(Order, order);
+
+        // Crear productos del pedido y calcular total
+        const { orderProducts, totalAmount } = await this.createOrderProducts(
+          savedOrder,
+          validatedProducts,
+          manager
+        );
+
+        // Actualizar el total del pedido
+        savedOrder.total = totalAmount.toString();
+        await manager.save(Order, savedOrder);
+
+        // Crear historial de estado inicial
+        await this.createInitialStatusHistory(savedOrder, user, manager);
+
+        // Retornar el pedido completo con todas las relaciones
+        return await this.getOrderWithRelations(savedOrder.id, user, manager);
+
+      } catch (error) {
+        // Log del error para debugging (mensaje y stack limitados)
+        console.error('Error al crear pedido:', {
+          message: error?.message ?? String(error),
+          stack: error?.stack?.split('\n').slice(0, 5).join('\n'),
+        });
+        
+        // Re-lanzar errores conocidos
+        if (error instanceof NotFoundException || 
+            error instanceof BadRequestException || 
+            error instanceof ForbiddenException) {
+          throw error;
+        }
+
+        // Para errores desconocidos, lanzar error genérico
+        throw new BadRequestException('Error al crear el pedido. Intenta nuevamente.');
+      }
+    });
   }
 
-  findAll() {
-    return `This action returns all orders`;
+  /**
+   * Validaciones previas que no requieren transacción
+   */
+  private async validateOrderCreation(createOrderDto: CreateOrderDto, user: User): Promise<void> {
+    // Validar que hay productos en el pedido
+    if (!createOrderDto.products || createOrderDto.products.length === 0) {
+      throw new BadRequestException('El pedido debe contener al menos un producto');
+    }
+
+    // Validar que no hay productos duplicados
+    const productIds = createOrderDto.products.map(p => p.productId);
+    const uniqueProductIds = new Set(productIds);
+    if (productIds.length !== uniqueProductIds.size) {
+      throw new BadRequestException('No se pueden agregar productos duplicados al pedido');
+    }
+
+    // Validar fecha de entrega (no puede ser en el pasado)
+    const deliveryDate = new Date(createOrderDto.deliveryDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    
+    if (deliveryDate < today) {
+      throw new BadRequestException('La fecha de entrega no puede ser en el pasado');
+    }
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} order`;
+  /**
+   * Genera un código único para el pedido dentro de la transacción
+   */
+  private async generateUniqueOrderCode(manager: any): Promise<string> {
+    // Use QueryBuilder to safely get the last order code. Using `findOne` without a
+    // where clause can throw in some TypeORM versions, so prefer an explicit query.
+    const lastOrder = await manager
+      .createQueryBuilder(Order, 'order')
+      .select(['order.code'])
+      .orderBy('order.createdAt', 'DESC')
+      .getOne();
+
+    return this.orderCodeService.generateSequentialCode(lastOrder?.code);
   }
 
-  update(id: number, updateOrderDto: UpdateOrderDto) {
-    return `This action updates a #${id} order`;
+  /**
+   * Valida los productos y obtiene la información completa
+   */
+  private async validateAndGetProducts(
+    productDtos: any[], 
+    manager: any
+  ): Promise<Array<{ dto: any; product: Product }>> {
+    const validatedProducts: Array<{ dto: any; product: Product }> = [];
+
+    for (const productDto of productDtos) {
+      // Validar cantidad
+      if (productDto.quantity <= 0) {
+        throw new BadRequestException(`La cantidad del producto debe ser mayor a 0`);
+      }
+
+      // Obtener producto de la base de datos
+      const product = await manager.findOne(Product, {
+        where: { id: productDto.productId, isActive: true },
+      });
+
+      if (!product) {
+        throw new BadRequestException(`Producto ${productDto.productId} no encontrado o inactivo`);
+      }
+
+      // Validar precio unitario si se proporciona
+      if (productDto.unitPrice && productDto.unitPrice <= 0) {
+        throw new BadRequestException(`El precio unitario debe ser mayor a 0`);
+      }
+
+      validatedProducts.push({ dto: productDto, product });
+    }
+
+    return validatedProducts;
   }
 
-  remove(id: number) {
-    return `This action removes a #${id} order`;
+  /**
+   * Crea los productos del pedido y calcula el total
+   */
+  private async createOrderProducts(
+    order: Order,
+    validatedProducts: Array<{ dto: any; product: Product }>,
+    manager: any
+  ): Promise<{ orderProducts: OrderProduct[]; totalAmount: number }> {
+    let totalAmount = 0;
+    const orderProducts: OrderProduct[] = [];
+
+    for (const { dto: productDto, product } of validatedProducts) {
+      const unitPrice = productDto.unitPrice || parseFloat(product.price || '0');
+      
+      if (unitPrice <= 0) {
+        throw new BadRequestException(`Precio inválido para el producto ${product.name}`);
+      }
+
+      const subtotal = unitPrice * productDto.quantity;
+      totalAmount += subtotal;
+
+      const orderProduct = manager.create(OrderProduct, {
+        order,
+        product,
+        quantity: productDto.quantity,
+        unitPrice: unitPrice.toString(),
+        subtotal: subtotal.toString(),
+      });
+
+      orderProducts.push(orderProduct);
+    }
+
+    // Validar que el total no sea 0
+    if (totalAmount <= 0) {
+      throw new BadRequestException('El total del pedido debe ser mayor a 0');
+    }
+
+    await manager.save(OrderProduct, orderProducts);
+    return { orderProducts, totalAmount };
+  }
+
+  /**
+   * Crea el historial de estado inicial
+   */
+  private async createInitialStatusHistory(
+    order: Order, 
+    user: User, 
+    manager: any
+  ): Promise<void> {
+    const statusHistory = manager.create(OrderStatusHistory, {
+      order,
+      status: OrderStatus.PENDING,
+      user,
+      notes: 'Pedido creado',
+    });
+
+    await manager.save(OrderStatusHistory, statusHistory);
+  }
+
+  /**
+   * Obtiene el pedido completo con todas las relaciones
+   */
+  private async getOrderWithRelations(
+    orderId: string, 
+    user: User, 
+    manager: any
+  ): Promise<Order> {
+    const queryBuilder = manager
+      .createQueryBuilder(Order, 'order')
+      .leftJoinAndSelect('order.customer', 'customer')
+      .leftJoinAndSelect('order.user', 'seller')
+      .leftJoinAndSelect('order.orderProducts', 'orderProducts')
+      .leftJoinAndSelect('orderProducts.product', 'product')
+      .leftJoinAndSelect('order.statusHistory', 'statusHistory')
+      .leftJoinAndSelect('statusHistory.user', 'statusUser')
+      .where('order.id = :orderId', { orderId })
+      .orderBy('statusHistory.timestamp', 'DESC');
+
+    const order = await queryBuilder.getOne();
+    
+    if (!order) {
+      throw new NotFoundException('Error al obtener el pedido creado');
+    }
+
+    return order;
+  }
+
+  async findAll(
+    query: GetOrdersQueryDto, 
+    user: User
+  ): Promise<PaginatedResponseDto<Order>> {
+    const { page = 1, limit = 10, fecha, estado, clienteId, codigo } = query;
+    const skip = (page - 1) * limit;
+
+    const queryBuilder = this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.customer', 'customer')
+      .leftJoinAndSelect('order.user', 'seller')
+      .leftJoinAndSelect('order.orderProducts', 'orderProducts')
+      .leftJoinAndSelect('orderProducts.product', 'product');
+
+    // Filtro por rol de usuario
+    if (user.role === UserRole.SELLER) {
+      queryBuilder.andWhere('order.user.id = :userId', { userId: user.id });
+    }
+
+    // Filtros opcionales
+    if (fecha) {
+      queryBuilder.andWhere('order.deliveryDate = :fecha', { fecha });
+    }
+
+    if (estado) {
+      queryBuilder.andWhere('order.status = :estado', { estado });
+    }
+
+    if (clienteId) {
+      queryBuilder.andWhere('order.customer.id = :clienteId', { clienteId });
+    }
+
+    if (codigo) {
+      queryBuilder.andWhere('order.code ILIKE :codigo', { codigo: `%${codigo}%` });
+    }
+
+    // Paginación
+    queryBuilder
+      .orderBy('order.createdAt', 'DESC')
+      .skip(skip)
+      .take(limit);
+
+    const [orders, totalItems] = await queryBuilder.getManyAndCount();
+    const totalPages = Math.ceil(totalItems / limit);
+
+    return {
+      data: orders,
+      page,
+      limit,
+      totalPages,
+      totalItems,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+    };
+  }
+
+  async findOne(id: string, user: User): Promise<Order> {
+    const queryBuilder = this.orderRepository
+      .createQueryBuilder('order')
+      .leftJoinAndSelect('order.customer', 'customer')
+      .leftJoinAndSelect('order.user', 'seller')
+      .leftJoinAndSelect('order.orderProducts', 'orderProducts')
+      .leftJoinAndSelect('orderProducts.product', 'product')
+      .leftJoinAndSelect('order.statusHistory', 'statusHistory')
+      .leftJoinAndSelect('statusHistory.user', 'statusUser')
+      .where('order.id = :id', { id });
+
+    // Filtro por rol de usuario
+    if (user.role === UserRole.SELLER) {
+      queryBuilder.andWhere('order.user.id = :userId', { userId: user.id });
+    }
+
+    const order = await queryBuilder
+      .orderBy('statusHistory.timestamp', 'DESC')
+      .getOne();
+
+    if (!order) {
+      throw new NotFoundException('Pedido no encontrado');
+    }
+
+    return order;
+  }
+
+  async update(id: string, updateOrderDto: UpdateOrderDto, user: User): Promise<Order> {
+    return this.dataSource.transaction(async (manager) => {
+      try {
+        // Obtener el pedido dentro de la transacción
+        const order = await this.getOrderForUpdate(id, user, manager);
+
+        // Validaciones de negocio
+        this.validateOrderUpdate(order, user);
+
+        // Validar campos a actualizar
+        this.validateUpdateData(updateOrderDto);
+
+        // Actualizar campos permitidos
+        Object.assign(order, updateOrderDto);
+        
+        // Guardar cambios
+        const updatedOrder = await manager.save(Order, order);
+
+        // Crear historial de cambio si hay modificaciones significativas
+        if (this.hasSignificantChanges(updateOrderDto)) {
+          await this.createUpdateStatusHistory(order, user, updateOrderDto, manager);
+        }
+
+        // Retornar el pedido actualizado con todas las relaciones
+        return await this.getOrderWithRelations(updatedOrder.id, user, manager);
+
+      } catch (error) {
+        console.error('Error al actualizar pedido:', error);
+        
+        if (error instanceof NotFoundException || 
+            error instanceof BadRequestException || 
+            error instanceof ForbiddenException) {
+          throw error;
+        }
+
+        throw new BadRequestException('Error al actualizar el pedido. Intenta nuevamente.');
+      }
+    });
+  }
+
+  /**
+   * Obtiene el pedido para actualización con validaciones
+   */
+  private async getOrderForUpdate(id: string, user: User, manager: any): Promise<Order> {
+    const queryBuilder = manager
+      .createQueryBuilder(Order, 'order')
+      .leftJoinAndSelect('order.customer', 'customer')
+      .leftJoinAndSelect('order.user', 'seller')
+      .where('order.id = :id', { id });
+
+    // Filtro por rol de usuario
+    if (user.role === UserRole.SELLER) {
+      queryBuilder.andWhere('order.user.id = :userId', { userId: user.id });
+    }
+
+    const order = await queryBuilder.getOne();
+
+    if (!order) {
+      throw new NotFoundException('Pedido no encontrado');
+    }
+
+    return order;
+  }
+
+  /**
+   * Validaciones de negocio para la actualización
+   */
+  private validateOrderUpdate(order: Order, user: User): void {
+    // No permitir edición si el pedido ya fue entregado o cancelado
+    if (order.status === OrderStatus.DELIVERED) {
+      throw new BadRequestException('No se puede editar un pedido que ya fue entregado');
+    }
+
+    if (order.status === OrderStatus.CANCELLED) {
+      throw new BadRequestException('No se puede editar un pedido que fue cancelado');
+    }
+
+    // Verificar permisos
+    if (user.role === UserRole.SELLER && order.user?.id !== user.id) {
+      throw new ForbiddenException('No tienes permiso para editar este pedido');
+    }
+  }
+
+  /**
+   * Valida los datos de actualización
+   */
+  private validateUpdateData(updateOrderDto: UpdateOrderDto): void {
+    // Validar fecha de entrega si se proporciona
+    if (updateOrderDto.deliveryDate) {
+      const deliveryDate = new Date(updateOrderDto.deliveryDate);
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      
+      if (deliveryDate < today) {
+        throw new BadRequestException('La fecha de entrega no puede ser en el pasado');
+      }
+    }
+
+    // Validar que las notas no estén vacías si se proporcionan
+    if (updateOrderDto.notes !== undefined && updateOrderDto.notes.trim() === '') {
+      throw new BadRequestException('Las notas no pueden estar vacías');
+    }
+  }
+
+  /**
+   * Determina si hay cambios significativos que requieren historial
+   */
+  private hasSignificantChanges(updateOrderDto: UpdateOrderDto): boolean {
+    return !!(updateOrderDto.deliveryDate || updateOrderDto.notes);
+  }
+
+  /**
+   * Crea historial para cambios de actualización
+   */
+  private async createUpdateStatusHistory(
+    order: Order, 
+    user: User, 
+    updateOrderDto: UpdateOrderDto,
+    manager: any
+  ): Promise<void> {
+    let notes = 'Pedido actualizado';
+    
+    if (updateOrderDto.deliveryDate) {
+      notes += ` - Nueva fecha de entrega: ${updateOrderDto.deliveryDate}`;
+    }
+    
+    if (updateOrderDto.notes) {
+      notes += ` - Notas: ${updateOrderDto.notes}`;
+    }
+
+    const statusHistory = manager.create(OrderStatusHistory, {
+      order,
+      status: order.status,
+      user,
+      notes,
+    });
+
+    await manager.save(OrderStatusHistory, statusHistory);
+  }
+
+  async remove(id: string, user: User): Promise<void> {
+    await this.dataSource.transaction(async (manager) => {
+      try {
+        // Obtener el pedido dentro de la transacción
+        const order = await this.getOrderForUpdate(id, user, manager);
+
+        // Validaciones de cancelación
+        this.validateOrderCancellation(order, user);
+
+        // Marcar como cancelado en lugar de eliminar físicamente
+        order.status = OrderStatus.CANCELLED;
+        await manager.save(Order, order);
+
+        // Registrar el cambio en el historial
+        await this.createCancellationStatusHistory(order, user, manager);
+
+      } catch (error) {
+        console.error('Error al cancelar pedido:', error);
+        
+        if (error instanceof NotFoundException || 
+            error instanceof BadRequestException || 
+            error instanceof ForbiddenException) {
+          throw error;
+        }
+
+        throw new BadRequestException('Error al cancelar el pedido. Intenta nuevamente.');
+      }
+    });
+  }
+
+  /**
+   * Validaciones específicas para cancelación de pedidos
+   */
+  private validateOrderCancellation(order: Order, user: User): void {
+    // Solo permitir cancelación si no ha sido entregado
+    if (order.status === OrderStatus.DELIVERED) {
+      throw new BadRequestException('No se puede cancelar un pedido que ya fue entregado');
+    }
+
+    // No permitir cancelar un pedido ya cancelado
+    if (order.status === OrderStatus.CANCELLED) {
+      throw new BadRequestException('El pedido ya se encuentra cancelado');
+    }
+
+    // Verificar permisos
+    if (user.role === UserRole.SELLER && order.user?.id !== user.id) {
+      throw new ForbiddenException('No tienes permiso para cancelar este pedido');
+    }
+
+    // Los admins pueden cancelar cualquier pedido, pero no si está en entrega
+    if (order.status === OrderStatus.IN_DELIVERY && user.role !== UserRole.ADMIN) {
+      throw new BadRequestException('No se puede cancelar un pedido que está en proceso de entrega. Contacta a un administrador.');
+    }
+  }
+
+  /**
+   * Crea el historial de cancelación
+   */
+  private async createCancellationStatusHistory(
+    order: Order, 
+    user: User, 
+    manager: any
+  ): Promise<void> {
+    const statusHistory = manager.create(OrderStatusHistory, {
+      order,
+      status: OrderStatus.CANCELLED,
+      user,
+      notes: `Pedido cancelado por ${user.role === UserRole.ADMIN ? 'administrador' : 'vendedor'}`,
+    });
+
+    await manager.save(OrderStatusHistory, statusHistory);
   }
 }
