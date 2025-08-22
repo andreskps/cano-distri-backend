@@ -87,11 +87,19 @@ export class UsersService {
   }
 
   async remove(id: string): Promise<void> {
-    const result = await this.userRepository.delete(id);
+    // Soft delete: marcar el usuario como inactivo en lugar de borrarlo físicamente
+    const user = await this.userRepository.findOne({ where: { id } });
 
-    if (result.affected === 0) {
+    if (!user) {
       throw new NotFoundException('Usuario no encontrado');
     }
+
+    if (!user.isActive) {
+      // Si ya está inactivo, no hacemos nada
+      return;
+    }
+
+    await this.userRepository.update(id, { isActive: false });
   }
 
   async validateUser(email: string, password: string): Promise<User | null> {

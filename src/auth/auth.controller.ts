@@ -19,19 +19,16 @@ export class AuthController {
   constructor(private readonly authService: AuthService) {}
 
   @Post('login')
-  @HttpCode(HttpStatus.OK)
   async login(@Body() loginDto: LoginDto): Promise<AuthResponseDto> {
     return this.authService.login(loginDto);
   }
 
   @Post('register')
-  @HttpCode(HttpStatus.CREATED)
   async register(@Body() registerDto: RegisterDto): Promise<AuthResponseDto> {
     return this.authService.register(registerDto);
   }
 
   @Post('refresh')
-  @HttpCode(HttpStatus.OK)
   async refreshToken(@Body() refreshTokenDto: RefreshTokenDto): Promise<RefreshResponseDto> {
     return this.authService.refreshToken(refreshTokenDto);
   }
@@ -51,7 +48,6 @@ export class AuthController {
 
   @Post('validate')
   @UseGuards(JwtAuthGuard)
-  @HttpCode(HttpStatus.OK)
   async validateToken(@GetUser() user: User): Promise<{ valid: boolean; user: Omit<User, 'password'> }> {
     return {
       valid: true,

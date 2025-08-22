@@ -4,11 +4,14 @@ import {
   Column,
   CreateDateColumn,
   OneToMany,
+  ManyToOne,
+  JoinColumn,
   Index,
 } from 'typeorm';
 import { CustomerAddress } from './customer-address.entity';
 import { Order } from 'src/orders/entities/order.entity';
 // import { Order } from '../../orders/entities/order.entity';
+import { User } from '../../users/entities/user.entity';
 
 @Entity('customers')
 export class Customer {
@@ -42,6 +45,13 @@ export class Customer {
 
   @OneToMany(() => Order, (order) => order.customer)
   orders: Order[];
+
+  @ManyToOne(() => User, (user) => user.customers, {
+    nullable: true,
+    onDelete: 'SET NULL',
+  })
+  @JoinColumn({ name: 'seller_id' })
+  seller: User | null;
 
   @CreateDateColumn({ type: 'timestamp with time zone' })
   createdAt: Date;

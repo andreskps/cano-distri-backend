@@ -4,7 +4,9 @@ import {
     Column,
     CreateDateColumn,
     Index,
+    OneToMany,
 } from 'typeorm';
+import { Customer } from '../../customers/entities/customer.entity';
 
 export enum UserRole {
     ADMIN = 'admin',
@@ -38,4 +40,7 @@ export class User {
 
     @CreateDateColumn({ type: 'timestamp with time zone' })
     createdAt: Date;
+
+    @OneToMany(() => Customer, (customer) => customer.seller)
+    customers?: Customer[];
 }

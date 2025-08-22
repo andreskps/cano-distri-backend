@@ -27,7 +27,6 @@ export class UsersController {
   @Post()
   @UseGuards(RolesGuard)
   @Roles(UserRole.ADMIN) // Solo los administradores pueden crear usuarios
-  @HttpCode(HttpStatus.CREATED)
   async create(@Body() createUserDto: CreateUserDto) {
     return this.usersService.create(createUserDto);
   }
