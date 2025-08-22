@@ -7,6 +7,7 @@ import {
   Index,
 } from 'typeorm';
 import { CustomerAddress } from './customer-address.entity';
+import { Order } from 'src/orders/entities/order.entity';
 // import { Order } from '../../orders/entities/order.entity';
 
 @Entity('customers')
@@ -39,8 +40,8 @@ export class Customer {
   })
   addresses: CustomerAddress[];
 
-  //   @OneToMany(() => Order, (order) => order.customer)
-  //   orders: Order[];
+  @OneToMany(() => Order, (order) => order.customer)
+  orders: Order[];
 
   @CreateDateColumn({ type: 'timestamp with time zone' })
   createdAt: Date;

@@ -13,8 +13,8 @@ export class OrderProduct {
   @ManyToOne(() => Product, (product) => product.orderProducts, { nullable: false, onDelete: 'RESTRICT' })
   product: Product;
 
-  @Column({ type: 'numeric', precision: 14, scale: 3, default: 1 })
-  quantity: string;
+  @Column({ type: 'int', default: 1 })
+  quantity: number;
 
   @Column({ type: 'numeric', precision: 14, scale: 2 })
   unitPrice: string;

@@ -1,9 +1,10 @@
-import { Entity, PrimaryGeneratedColumn, ManyToOne, Column, CreateDateColumn } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, ManyToOne, Column, CreateDateColumn, Index } from 'typeorm';
 import { Order } from './order.entity';
 import { User } from '../../users/entities/user.entity';
 import { OrderStatus } from './order-status.enum';
 
 @Entity('order_status_history')
+@Index(['order'])
 export class OrderStatusHistory {
   @PrimaryGeneratedColumn('uuid')
   id: string;
