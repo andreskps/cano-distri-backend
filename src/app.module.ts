@@ -4,6 +4,7 @@ import { AppService } from './app.service';
 import { ConfigModule } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { UsersModule } from './users/users.module';
+import { CustomersModule } from './customers/customers.module';
 
 @Module({
   imports: [
@@ -15,10 +16,13 @@ import { UsersModule } from './users/users.module';
       username: process.env.POSTGRES_USER,
       password: process.env.POSTGRES_PASSWORD,
       database: process.env.POSTGRES_DB,
-      synchronize: process.env.TYPEORM_SYNC ? process.env.TYPEORM_SYNC === 'true' : false,
+      autoLoadEntities: true,
+      synchronize: true,
+      // synchronize: process.env.TYPEORM_SYNC ? process.env.TYPEORM_SYNC === 'true' : false,
       // extra: { ssl: false }, // configure SSL if needed
     }),
     UsersModule,
+    CustomersModule,
   ],
 
   controllers: [AppController],
