@@ -17,6 +17,7 @@ export class Product {
 
   @Column({ type: 'numeric', precision: 12, scale: 2, nullable: true })
   costPrice: string | null; // cost price in the smallest unit (e.g. cents)
+  
   @Column({ type: 'numeric', precision: 12, scale: 2, nullable: true })
   suggestedPrice: string | null;
 
@@ -25,6 +26,9 @@ export class Product {
 
   @Column({ type: 'text', nullable: true })
   notes: string | null;
+
+  @Column({ type: 'boolean', default: true })
+  isActive: boolean;
 
   @OneToMany(() => OrderProduct, (op) => op.product)
   orderProducts: OrderProduct[];

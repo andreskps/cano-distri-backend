@@ -1,26 +1,161 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
+import { PaginationDto } from './dto/pagination.dto';
+import { Product } from './entities/product.entity';
+import { User, UserRole } from '../users/entities/user.entity';
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  meta: {
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    hasNextPage: boolean;
+    hasPrevPage: boolean;
+  };
+}
 
 @Injectable()
 export class ProductsService {
-  create(createProductDto: CreateProductDto) {
-    return 'This action adds a new product';
+  constructor(
+    @InjectRepository(Product)
+    private readonly productRepository: Repository<Product>,
+  ) {}
+
+  async create(createProductDto: CreateProductDto, user: User): Promise<Product> {
+    // Solo administradores pueden crear productos
+    if (user.role !== UserRole.ADMIN) {
+      throw new ForbiddenException('Solo los administradores pueden crear productos');
+    }
+
+    // Verificar si el código ya existe
+    const existingProduct = await this.productRepository.findOne({
+      where: { code: createProductDto.code },
+    });
+
+    if (existingProduct) {
+      throw new ConflictException('Ya existe un producto con este código');
+    }
+
+    const product = this.productRepository.create(createProductDto);
+    return await this.productRepository.save(product);
   }
 
-  findAll() {
-    return `This action returns all products`;
+  async findAll(paginationDto: PaginationDto): Promise<PaginatedResponse<Product>> {
+    const { page = 1, limit = 10 } = paginationDto;
+    const skip = (page - 1) * limit;
+
+    // Solo mostrar productos activos
+    const [products, total] = await this.productRepository.findAndCount({
+      where: { isActive: true },
+      skip,
+      take: limit,
+      order: { createdAt: 'DESC' },
+    });
+
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      data: products,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    };
   }
 
-  findOne(id: number) {
-    return `This action returns a #${id} product`;
+  async findOne(id: string): Promise<Product> {
+    const product = await this.productRepository.findOne({
+      where: { id, isActive: true },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Producto no encontrado');
+    }
+
+    return product;
   }
 
-  update(id: number, updateProductDto: UpdateProductDto) {
-    return `This action updates a #${id} product`;
+  async update(id: string, updateProductDto: UpdateProductDto, user: User): Promise<Product> {
+    // Solo administradores pueden editar productos
+    if (user.role !== UserRole.ADMIN) {
+      throw new ForbiddenException('Solo los administradores pueden editar productos');
+    }
+
+    const product = await this.findOne(id);
+
+    // Si se está actualizando el código, verificar que no exista
+    if (updateProductDto.code && updateProductDto.code !== product.code) {
+      const existingProduct = await this.productRepository.findOne({
+        where: { code: updateProductDto.code },
+      });
+
+      if (existingProduct) {
+        throw new ConflictException('Ya existe un producto con este código');
+      }
+    }
+
+    await this.productRepository.update(id, updateProductDto);
+    return await this.findOne(id);
   }
 
-  remove(id: number) {
-    return `This action removes a #${id} product`;
+  async remove(id: string, user: User): Promise<void> {
+    // Solo administradores pueden eliminar productos
+    if (user.role !== UserRole.ADMIN) {
+      throw new ForbiddenException('Solo los administradores pueden eliminar productos');
+    }
+
+    const product = await this.productRepository.findOne({ where: { id } });
+
+    if (!product) {
+      throw new NotFoundException('Producto no encontrado');
+    }
+
+    // Soft delete: marcar como inactivo
+    await this.productRepository.update(id, { isActive: false });
+  }
+
+  async findByCode(code: string): Promise<Product | null> {
+    return await this.productRepository.findOne({
+      where: { code, isActive: true },
+    });
+  }
+
+  async findAllIncludingInactive(paginationDto: PaginationDto, user: User): Promise<PaginatedResponse<Product>> {
+    // Solo administradores pueden ver productos inactivos
+    if (user.role !== UserRole.ADMIN) {
+      return this.findAll(paginationDto);
+    }
+
+    const { page = 1, limit = 10 } = paginationDto;
+    const skip = (page - 1) * limit;
+
+    const [products, total] = await this.productRepository.findAndCount({
+      skip,
+      take: limit,
+      order: { createdAt: 'DESC' },
+    });
+
+    const totalPages = Math.ceil(total / limit);
+
+    return {
+      data: products,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+    };
   }
 }
