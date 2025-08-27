@@ -1,10 +1,13 @@
 import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, ILike } from 'typeorm';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
-import { PaginationDto } from './dto/pagination.dto';
+import { CreateCustomerAddressDto } from './dto/create-customer-address.dto';
+import { UpdateCustomerAddressDto } from './dto/update-customer-address.dto';
+import { CustomerQueryParams, PaginationDto } from './dto/pagination.dto';
 import { Customer } from './entities/customer.entity';
+import { CustomerAddress } from './entities/customer-address.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 
 export interface PaginatedResponse<T> {
@@ -24,6 +27,8 @@ export class CustomersService {
   constructor(
     @InjectRepository(Customer)
     private readonly customerRepository: Repository<Customer>,
+    @InjectRepository(CustomerAddress)
+    private readonly customerAddressRepository: Repository<CustomerAddress>,
   ) {}
 
   async create(createCustomerDto: CreateCustomerDto, seller: User): Promise<Customer> {
@@ -36,10 +41,17 @@ export class CustomersService {
   }
 
   async findAll(
-    paginationDto: PaginationDto,
+    queryParams: CustomerQueryParams,
     user: User,
   ): Promise<PaginatedResponse<Customer>> {
-    const { page = 1, limit = 10 } = paginationDto;
+    const { 
+      page = 1, 
+      limit = 10, 
+      search, 
+      sortBy = 'createdAt', 
+      sortOrder = 'DESC' 
+    } = queryParams;
+    
     const skip = (page - 1) * limit;
 
     const queryBuilder = this.customerRepository
@@ -51,12 +63,27 @@ export class CustomersService {
     if (user.role === UserRole.SELLER) {
       queryBuilder.where('customer.seller.id = :sellerId', { sellerId: user.id });
     }
-    // Si es admin, ve todos los clientes (no agregamos condición WHERE)
+
+    // Agregar búsqueda si está presente
+    if (search && search.trim()) {
+      const searchTerm = `%${search.trim()}%`;
+      const searchCondition = `
+        (customer.name ILIKE :searchTerm OR 
+         customer.email ILIKE :searchTerm OR 
+         customer.phone ILIKE :searchTerm )
+      `;
+      
+      if (user.role === UserRole.SELLER) {
+        queryBuilder.andWhere(searchCondition, { searchTerm });
+      } else {
+        queryBuilder.where(searchCondition, { searchTerm });
+      }
+    }
 
     const [customers, total] = await queryBuilder
       .skip(skip)
       .take(limit)
-      .orderBy('customer.createdAt', 'DESC')
+      .orderBy(`customer.${sortBy}`, sortOrder)
       .getManyAndCount();
 
     const totalPages = Math.ceil(total / limit);
@@ -155,5 +182,88 @@ export class CustomersService {
         hasPrevPage: page > 1,
       },
     };
+  }
+
+  // ==================== MÉTODOS PARA DIRECCIONES ====================
+
+  /**
+   * Añadir una nueva dirección a un cliente
+   */
+  async addAddress(
+    customerId: string, 
+    createAddressDto: CreateCustomerAddressDto, 
+    user: User
+  ): Promise<CustomerAddress> {
+    // Verificar que el cliente existe y pertenece al vendedor
+    const customer = await this.findOne(customerId, user);
+
+    const address = this.customerAddressRepository.create({
+      ...createAddressDto,
+      customer,
+    });
+
+    return await this.customerAddressRepository.save(address);
+  }
+
+  /**
+   * Obtener todas las direcciones de un cliente
+   */
+  async getCustomerAddresses(customerId: string, user: User): Promise<CustomerAddress[]> {
+    // Verificar que el cliente existe y pertenece al vendedor
+    await this.findOne(customerId, user);
+
+    return await this.customerAddressRepository.find({
+      where: { customer: { id: customerId } },
+      order: { createdAt: 'DESC' },
+    });
+  }
+
+  /**
+   * Obtener una dirección específica
+   */
+  async getAddress(customerId: string, addressId: string, user: User): Promise<CustomerAddress> {
+    // Verificar que el cliente existe y pertenece al vendedor
+    await this.findOne(customerId, user);
+
+    const address = await this.customerAddressRepository.findOne({
+      where: { 
+        id: addressId, 
+        customer: { id: customerId } 
+      },
+      relations: ['customer'],
+    });
+
+    if (!address) {
+      throw new NotFoundException('Dirección no encontrada');
+    }
+
+    return address;
+  }
+
+  /**
+   * Actualizar una dirección existente
+   */
+  async updateAddress(
+    customerId: string, 
+    addressId: string, 
+    updateAddressDto: UpdateCustomerAddressDto, 
+    user: User
+  ): Promise<CustomerAddress> {
+    // Verificar que la dirección existe y pertenece al cliente del vendedor
+    await this.getAddress(customerId, addressId, user);
+
+    await this.customerAddressRepository.update(addressId, updateAddressDto);
+
+    return await this.getAddress(customerId, addressId, user);
+  }
+
+  /**
+   * Eliminar una dirección
+   */
+  async removeAddress(customerId: string, addressId: string, user: User): Promise<void> {
+    // Verificar que la dirección existe y pertenece al cliente del vendedor
+    await this.getAddress(customerId, addressId, user);
+
+    await this.customerAddressRepository.delete(addressId);
   }
 }

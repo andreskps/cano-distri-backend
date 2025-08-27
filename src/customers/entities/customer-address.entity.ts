@@ -20,6 +20,18 @@ export class CustomerAddress {
   @Column({ type: 'varchar', length: 500 })
   address: string;
 
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  city: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  state: string | null;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  postalCode: string | null;
+
+  @Column({ type: 'varchar', length: 100, nullable: true })
+  country: string | null;
+
   // An address can be linked to many orders
 //   @OneToMany(() => Order, (order) => order.address)
 //   orders: Order[];
