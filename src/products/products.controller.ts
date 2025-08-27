@@ -15,7 +15,7 @@ import {
 import { ProductsService, PaginatedResponse } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
-import { PaginationDto } from './dto/pagination.dto';
+import { ProductQueryParams, PaginationDto } from './dto/pagination.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
@@ -26,9 +26,9 @@ import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery, ApiParam }
 import { ProductResponseDto } from './dto/product-response.dto';
 import { PaginatedProductResponseDto } from './dto/paginated-product-response.dto';
 
-@ApiTags('Productos')
+@ApiTags('Products')
 @ApiBearerAuth('access-token')
-@Controller('productos')
+@Controller('products')
 @UseGuards(JwtAuthGuard) // Proteger todas las rutas
 export class ProductsController {
   constructor(private readonly productsService: ProductsService) {}
@@ -47,14 +47,18 @@ export class ProductsController {
   }
 
   @Get()
-  @ApiOperation({ summary: 'Listar productos activos' })
+  @ApiOperation({ summary: 'Listar productos con filtros avanzados' })
   @ApiQuery({ name: 'page', required: false, description: 'Número de página' })
   @ApiQuery({ name: 'limit', required: false, description: 'Cantidad por página' })
+  @ApiQuery({ name: 'search', required: false, description: 'Término de búsqueda' })
+  @ApiQuery({ name: 'sortBy', required: false, description: 'Campo de ordenamiento', enum: ['name', 'price', 'code', 'createdAt', 'costPrice', 'suggestedPrice'] })
+  @ApiQuery({ name: 'sortOrder', required: false, description: 'Orden de clasificación', enum: ['ASC', 'DESC'] })
+  @ApiQuery({ name: 'isActive', required: false, description: 'Filtrar por estado activo/inactivo' })
   @ApiResponse({ status: 200, description: 'Lista paginada de productos', type: PaginatedProductResponseDto })
   async findAll(
-    @Query() paginationDto: PaginationDto,
+    @Query() queryParams: ProductQueryParams,
   ): Promise<PaginatedResponse<Product>> {
-    return this.productsService.findAll(paginationDto);
+    return this.productsService.findAll(queryParams);
   }
 
   @Get('all-including-inactive')

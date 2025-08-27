@@ -26,9 +26,9 @@ import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery, ApiParam }
 import { CustomerResponseDto } from './dto/customer-response.dto';
 import { PaginatedCustomerResponseDto } from './dto/paginated-customer-response.dto';
 
-@ApiTags('Clientes')
+@ApiTags('Customers')
 @ApiBearerAuth('access-token')
-@Controller('clientes')
+@Controller('customers')
 @UseGuards(JwtAuthGuard) // Proteger todas las rutas
 export class CustomersController {
   constructor(private readonly customersService: CustomersService) {}

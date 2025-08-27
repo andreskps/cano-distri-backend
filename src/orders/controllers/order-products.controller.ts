@@ -18,20 +18,20 @@ import { User } from '../../users/entities/user.entity';
 import { AddProductToOrderDto, UpdateOrderProductDto } from '../dto/order-product.dto';
 import { OrderProductResponseDto } from '../dto/order-responses.dto';
 
-@ApiTags('Productos en Pedidos')
+@ApiTags('Products in Orders')
 @ApiBearerAuth('access-token')
-@Controller('pedidos')
+@Controller('orders')
 @UseGuards(JwtAuthGuard)
 export class OrderProductsController {
   constructor(private readonly orderProductsService: OrderProductsService) {}
 
-  @Post(':pedidoId/productos')
+  @Post(':orderId/products')
   @HttpCode(HttpStatus.CREATED)
   @ApiOperation({ summary: 'Agregar producto al pedido' })
-  @ApiParam({ name: 'pedidoId', description: 'ID del pedido' })
+  @ApiParam({ name: 'orderId', description: 'ID del pedido' })
   @ApiResponse({ status: 201, description: 'Producto agregado al pedido', type: OrderProductResponseDto })
   async addProductToOrder(
-    @Param('pedidoId', ParseUUIDPipe) orderId: string,
+    @Param('orderId', ParseUUIDPipe) orderId: string,
     @Body() addProductDto: AddProductToOrderDto,
     @GetUser() user: User,
   ) {

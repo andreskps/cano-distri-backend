@@ -18,8 +18,7 @@ export class Product {
   @Column({ type: 'numeric', precision: 12, scale: 2, nullable: true })
   costPrice: string | null; // cost price in the smallest unit (e.g. cents)
   
-  @Column({ type: 'numeric', precision: 12, scale: 2, nullable: true })
-  suggestedPrice: string | null;
+ 
 
   @Column({ type: 'varchar', length: 50, nullable: true })
   unit: string | null; // e.g. kg, liter

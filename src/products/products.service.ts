@@ -1,9 +1,9 @@
 import { Injectable, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { Repository, ILike, FindManyOptions, Or } from 'typeorm';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
-import { PaginationDto } from './dto/pagination.dto';
+import { ProductQueryParams, PaginationDto } from './dto/pagination.dto';
 import { Product } from './entities/product.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 
@@ -45,18 +45,26 @@ export class ProductsService {
     return await this.productRepository.save(product);
   }
 
-  async findAll(paginationDto: PaginationDto): Promise<PaginatedResponse<Product>> {
-    const { page = 1, limit = 10 } = paginationDto;
+  async findAll(queryParams: ProductQueryParams): Promise<PaginatedResponse<Product>> {
+    const { 
+      page = 1, 
+      limit = 10, 
+      search, 
+      sortBy = 'createdAt', 
+      sortOrder = 'DESC',
+      isActive = true 
+    } = queryParams;
+    
     const skip = (page - 1) * limit;
 
-    // Solo mostrar productos activos
-    const [products, total] = await this.productRepository.findAndCount({
-      where: { isActive: true },
+    const queryOptions: FindManyOptions<Product> = {
       skip,
       take: limit,
-      order: { createdAt: 'DESC' },
-    });
+      order: { [sortBy]: sortOrder },
+      where: this.buildSearchConditions(search, isActive),
+    };
 
+    const [products, total] = await this.productRepository.findAndCount(queryOptions);
     const totalPages = Math.ceil(total / limit);
 
     return {
@@ -132,18 +140,29 @@ export class ProductsService {
   async findAllIncludingInactive(paginationDto: PaginationDto, user: User): Promise<PaginatedResponse<Product>> {
     // Solo administradores pueden ver productos inactivos
     if (user.role !== UserRole.ADMIN) {
-      return this.findAll(paginationDto);
+      // Convertir PaginationDto a ProductQueryParams para compatibilidad
+      const queryParams: ProductQueryParams = {
+        page: paginationDto.page,
+        limit: paginationDto.limit,
+        search: paginationDto.search,
+        sortBy: 'createdAt',
+        sortOrder: 'DESC',
+        isActive: true
+      };
+      return this.findAll(queryParams);
     }
 
-    const { page = 1, limit = 10 } = paginationDto;
+    const { page = 1, limit = 10, search } = paginationDto;
     const skip = (page - 1) * limit;
 
-    const [products, total] = await this.productRepository.findAndCount({
+    const queryOptions: FindManyOptions<Product> = {
       skip,
       take: limit,
       order: { createdAt: 'DESC' },
-    });
+      where: this.buildSearchConditions(search, undefined), // undefined para incluir todos
+    };
 
+    const [products, total] = await this.productRepository.findAndCount(queryOptions);
     const totalPages = Math.ceil(total / limit);
 
     return {
@@ -157,5 +176,35 @@ export class ProductsService {
         hasPrevPage: page > 1,
       },
     };
+  }
+
+  /**
+   * Construye las condiciones de búsqueda para productos
+   * @param search - Término de búsqueda opcional
+   * @param isActive - Si filtrar por productos activos/inactivos o todos
+   * @returns Condiciones para la consulta WHERE
+   */
+  private buildSearchConditions(search?: string, isActive?: boolean) {
+    const baseWhere: any = {};
+    
+    // Agregar filtro de isActive si está definido
+    if (isActive !== undefined) {
+      baseWhere.isActive = isActive;
+    }
+
+    // Si no hay búsqueda, retornar solo el filtro de isActive
+    if (!search || !search.trim()) {
+      return baseWhere;
+    }
+
+    // Si hay búsqueda, crear condiciones OR para los campos disponibles
+    const searchTerm = `%${search.trim()}%`;
+    const searchConditions = [
+      { ...baseWhere, name: ILike(searchTerm) },
+      { ...baseWhere, code: ILike(searchTerm) },
+      { ...baseWhere, notes: ILike(searchTerm) }, // Usar 'notes' en lugar de 'description'
+    ];
+
+    return searchConditions;
   }
 }

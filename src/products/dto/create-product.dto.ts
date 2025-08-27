@@ -13,10 +13,6 @@ export class CreateProductDto {
   @MinLength(1, { message: 'El código es requerido' })
   code: string;
 
-  @ApiPropertyOptional({ example: '25.50', description: 'Precio de venta' })
-  @IsOptional()
-  @IsNumberString({}, { message: 'El precio debe ser un número válido' })
-  price?: string;
 
   @ApiPropertyOptional({ example: '15.00', description: 'Precio de costo' })
   @IsOptional()
@@ -26,7 +22,7 @@ export class CreateProductDto {
   @ApiPropertyOptional({ example: '30.00', description: 'Precio sugerido' })
   @IsOptional()
   @IsNumberString({}, { message: 'El precio sugerido debe ser un número válido' })
-  suggestedPrice?: string;
+  price?: string;
 
   @ApiPropertyOptional({ example: 'kg', description: 'Unidad de medida' })
   @IsOptional()
