@@ -43,13 +43,16 @@ export class CreateOrderDto {
   @IsDateString()
   deliveryDate: string;
 
+  @ApiProperty({ example: 'uuid-del-direccion', description: 'ID de la dirección de entrega' })
+  @IsUUID()
+  addressId: string;
+
   @ApiPropertyOptional({ 
     example: 'Entrega en horario de mañana', 
     description: 'Notas adicionales del pedido' 
   })
   @IsOptional()
   @IsString()
-  @MinLength(1)
   notes?: string;
 
   @ApiProperty({ 

@@ -12,9 +12,10 @@ import { OrderProduct } from './entities/order-product.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { Product } from '../products/entities/product.entity';
 import { Customer } from '../customers/entities/customer.entity';
+import { CustomerAddress } from 'src/customers/entities/customer-address.entity';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([Order, OrderProduct, OrderStatusHistory, Product, Customer])],
+  imports: [TypeOrmModule.forFeature([Order, OrderProduct, OrderStatusHistory, Product, Customer,CustomerAddress])],
   controllers: [OrdersController, OrderProductsController, OrderStatusController],
   providers: [OrdersService, OrderProductsService, OrderStatusService, OrderCodeService],
 })

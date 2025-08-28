@@ -15,6 +15,7 @@ import { OrderProduct } from './entities/order-product.entity';
 import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { Product } from '../products/entities/product.entity';
 import { Customer } from '../customers/entities/customer.entity';
+import { CustomerAddress } from '../customers/entities/customer-address.entity';
 import { User } from '../users/entities/user.entity';
 import { OrderStatus } from './entities/order-status.enum';
 import { UserRole } from '../users/entities/user.entity';
@@ -33,6 +34,8 @@ export class OrdersService {
     private readonly productRepository: Repository<Product>,
     @InjectRepository(Customer)
     private readonly customerRepository: Repository<Customer>,
+    @InjectRepository(CustomerAddress)
+    private readonly customerAddressRepository: Repository<CustomerAddress>,
     private readonly orderCodeService: OrderCodeService,
     private readonly dataSource: DataSource,
   ) {}
@@ -59,6 +62,18 @@ export class OrdersService {
           throw new ForbiddenException('No tienes permiso para crear pedidos para este cliente');
         }
 
+        // Obtener la dirección de entrega
+        const address = await manager.findOne(CustomerAddress, {
+          where: { 
+            id: createOrderDto.addressId, 
+            customer: { id: createOrderDto.customerId } 
+          }
+        });
+
+        if (!address) {
+          throw new BadRequestException('La dirección especificada no pertenece al cliente o no existe');
+        }
+
         // Generar código único para el pedido
         const orderCode = await this.generateUniqueOrderCode(manager);
 
@@ -72,6 +87,7 @@ export class OrdersService {
         const order = manager.create(Order, {
           code: orderCode,
           customer,
+          address,
           user,
           deliveryDate: createOrderDto.deliveryDate,
           notes: createOrderDto.notes,
@@ -141,6 +157,19 @@ export class OrdersService {
     
     if (deliveryDate < today) {
       throw new BadRequestException('La fecha de entrega no puede ser en el pasado');
+    }
+
+    // Validar que la dirección pertenece al cliente
+    const address = await this.customerAddressRepository.findOne({
+      where: { 
+        id: createOrderDto.addressId, 
+        customer: { id: createOrderDto.customerId } 
+      },
+      relations: ['customer']
+    });
+
+    if (!address) {
+      throw new BadRequestException('La dirección especificada no pertenece al cliente o no existe');
     }
   }
 
@@ -218,6 +247,7 @@ export class OrdersService {
       const orderProduct = manager.create(OrderProduct, {
         order,
         product,
+        
         quantity: productDto.quantity,
         unitPrice: unitPrice.toString(),
         subtotal: subtotal.toString(),
@@ -264,6 +294,7 @@ export class OrdersService {
     const queryBuilder = manager
       .createQueryBuilder(Order, 'order')
       .leftJoinAndSelect('order.customer', 'customer')
+      .leftJoinAndSelect('order.address', 'address')
       .leftJoinAndSelect('order.user', 'seller')
       .leftJoinAndSelect('order.orderProducts', 'orderProducts')
       .leftJoinAndSelect('orderProducts.product', 'product')
@@ -291,6 +322,7 @@ export class OrdersService {
     const queryBuilder = this.orderRepository
       .createQueryBuilder('order')
       .leftJoinAndSelect('order.customer', 'customer')
+      .leftJoinAndSelect('order.address', 'address')
       .leftJoinAndSelect('order.user', 'seller')
       .leftJoinAndSelect('order.orderProducts', 'orderProducts')
       .leftJoinAndSelect('orderProducts.product', 'product');
@@ -341,6 +373,7 @@ export class OrdersService {
     const queryBuilder = this.orderRepository
       .createQueryBuilder('order')
       .leftJoinAndSelect('order.customer', 'customer')
+      .leftJoinAndSelect('order.address', 'address')
       .leftJoinAndSelect('order.user', 'seller')
       .leftJoinAndSelect('order.orderProducts', 'orderProducts')
       .leftJoinAndSelect('orderProducts.product', 'product')
@@ -374,10 +407,25 @@ export class OrdersService {
         this.validateOrderUpdate(order, user);
 
         // Validar campos a actualizar
-        this.validateUpdateData(updateOrderDto);
+        await this.validateUpdateData(updateOrderDto, order.customer.id, manager);
 
-        // Actualizar campos permitidos
-        Object.assign(order, updateOrderDto);
+        // Si se cambia la dirección, obtenerla y validarla
+        if (updateOrderDto.addressId) {
+          const newAddress = await manager.findOne(CustomerAddress, {
+            where: { 
+              id: updateOrderDto.addressId, 
+              customer: { id: order.customer.id } 
+            }
+          });
+
+          if (newAddress) {
+            order.address = newAddress;
+          }
+        }
+
+        // Actualizar campos permitidos (excluyendo addressId que ya se manejó)
+        const { addressId, ...updateFields } = updateOrderDto;
+        Object.assign(order, updateFields);
         
         // Guardar cambios
         const updatedOrder = await manager.save(Order, order);
@@ -411,6 +459,7 @@ export class OrdersService {
     const queryBuilder = manager
       .createQueryBuilder(Order, 'order')
       .leftJoinAndSelect('order.customer', 'customer')
+      .leftJoinAndSelect('order.address', 'address')
       .leftJoinAndSelect('order.user', 'seller')
       .where('order.id = :id', { id });
 
@@ -450,7 +499,7 @@ export class OrdersService {
   /**
    * Valida los datos de actualización
    */
-  private validateUpdateData(updateOrderDto: UpdateOrderDto): void {
+  private async validateUpdateData(updateOrderDto: UpdateOrderDto, customerId?: string, manager?: any): Promise<void> {
     // Validar fecha de entrega si se proporciona
     if (updateOrderDto.deliveryDate) {
       const deliveryDate = new Date(updateOrderDto.deliveryDate);
@@ -466,13 +515,27 @@ export class OrdersService {
     if (updateOrderDto.notes !== undefined && updateOrderDto.notes.trim() === '') {
       throw new BadRequestException('Las notas no pueden estar vacías');
     }
+
+    // Validar dirección si se proporciona
+    if (updateOrderDto.addressId && customerId && manager) {
+      const address = await manager.findOne(CustomerAddress, {
+        where: { 
+          id: updateOrderDto.addressId, 
+          customer: { id: customerId } 
+        }
+      });
+
+      if (!address) {
+        throw new BadRequestException('La dirección especificada no pertenece al cliente o no existe');
+      }
+    }
   }
 
   /**
    * Determina si hay cambios significativos que requieren historial
    */
   private hasSignificantChanges(updateOrderDto: UpdateOrderDto): boolean {
-    return !!(updateOrderDto.deliveryDate || updateOrderDto.notes);
+    return !!(updateOrderDto.deliveryDate || updateOrderDto.notes || updateOrderDto.addressId);
   }
 
   /**
@@ -488,6 +551,10 @@ export class OrdersService {
     
     if (updateOrderDto.deliveryDate) {
       notes += ` - Nueva fecha de entrega: ${updateOrderDto.deliveryDate}`;
+    }
+    
+    if (updateOrderDto.addressId) {
+      notes += ` - Dirección de entrega actualizada`;
     }
     
     if (updateOrderDto.notes) {
@@ -553,10 +620,9 @@ export class OrdersService {
       throw new ForbiddenException('No tienes permiso para cancelar este pedido');
     }
 
-    // Los admins pueden cancelar cualquier pedido, pero no si está en entrega
-    if (order.status === OrderStatus.IN_DELIVERY && user.role !== UserRole.ADMIN) {
-      throw new BadRequestException('No se puede cancelar un pedido que está en proceso de entrega. Contacta a un administrador.');
-    }
+  // Con el modelo actual (pending, delivered, cancelled) no hay estados intermedios
+  // que bloqueen la cancelación aparte de 'delivered' y 'cancelled'.
+  // Los administradores pueden cancelar cualquier pedido que no esté entregado.
   }
 
   /**

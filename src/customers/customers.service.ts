@@ -1,4 +1,4 @@
-import { Injectable, NotFoundException, ForbiddenException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, ILike } from 'typeorm';
 import { CreateCustomerDto } from './dto/create-customer.dto';
@@ -32,12 +32,54 @@ export class CustomersService {
   ) {}
 
   async create(createCustomerDto: CreateCustomerDto, seller: User): Promise<Customer> {
+    // Validaciones y limpieza básica
+    const name = createCustomerDto.name?.trim();
+    const email = createCustomerDto.email?.trim().toLowerCase();
+    const phone = createCustomerDto.phone?.trim();
+
+    if (!name) {
+      throw new BadRequestException('El nombre del cliente es requerido');
+    }
+
+    if (!email) {
+      throw new BadRequestException('El correo del cliente es requerido');
+    }
+
+    // Verificar duplicados por correo
+    const existing = await this.customerRepository.findOne({
+      where: [
+        { email },
+      ],
+    });
+
+    if (existing) {
+      throw new BadRequestException('Ya existe un cliente con ese email');
+    }
+
     const customer = this.customerRepository.create({
       ...createCustomerDto,
+      name,
+      email,
+      phone,
       seller, // Asignar el vendedor actual
     });
 
-    return await this.customerRepository.save(customer);
+    try {
+      return await this.customerRepository.save(customer);
+    } catch (error) {
+      // Log limitado para depuración
+      console.error('Error creando cliente:', {
+        message: error?.message ?? String(error),
+      });
+
+      // Detectar constraint unique de PG u otros errores predecibles
+      const msg = error?.message ?? '';
+      if (/unique|duplicate|23505/i.test(msg)) {
+        throw new BadRequestException('Ya existe un cliente con ese email o teléfono');
+      }
+
+      throw new InternalServerErrorException('Error al crear cliente. Intenta nuevamente.');
+    }
   }
 
   async findAll(
