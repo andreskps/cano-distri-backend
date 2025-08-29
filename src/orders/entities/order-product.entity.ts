@@ -19,6 +19,12 @@ export class OrderProduct {
   @Column({ type: 'numeric', precision: 14, scale: 2 })
   unitPrice: string;
 
+  @Column({ type: 'numeric', precision: 14, scale: 2, nullable: true })
+  costPrice: string | null;
+
+  @Column({ type: 'numeric', precision: 14, scale: 2, nullable: true })
+  profit: string | null;
+
   @Column({ type: 'numeric', precision: 14, scale: 2 })
   subtotal: string;
 

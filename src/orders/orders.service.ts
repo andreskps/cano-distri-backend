@@ -235,11 +235,19 @@ export class OrdersService {
     const orderProducts: OrderProduct[] = [];
 
     for (const { dto: productDto, product } of validatedProducts) {
-      const unitPrice = productDto.unitPrice || parseFloat(product.price || '0');
-      
+      // Determinar precio unitario (viene por DTO o se toma del producto)
+      const unitPrice = productDto.unitPrice ?? parseFloat(product.price ?? '0');
+
       if (unitPrice <= 0) {
         throw new BadRequestException(`Precio inválido para el producto ${product.name}`);
       }
+
+      // Calcular costPrice y profit usando el helper
+      const { costPriceValue, profitValue } = this.calculateProductPricing(
+        unitPrice, 
+        productDto.quantity, 
+        product
+      );
 
       const subtotal = unitPrice * productDto.quantity;
       totalAmount += subtotal;
@@ -247,9 +255,10 @@ export class OrdersService {
       const orderProduct = manager.create(OrderProduct, {
         order,
         product,
-        
         quantity: productDto.quantity,
         unitPrice: unitPrice.toString(),
+        costPrice: costPriceValue,
+        profit: profitValue,
         subtotal: subtotal.toString(),
       });
 
@@ -407,14 +416,16 @@ export class OrdersService {
   async update(id: string, updateOrderDto: UpdateOrderDto, user: User): Promise<Order> {
     return this.dataSource.transaction(async (manager) => {
       try {
-        // Obtener el pedido dentro de la transacción
-        const order = await this.getOrderForUpdate(id, user, manager);
+        // Obtener el pedido dentro de la transacción con productos
+        const order = await this.getOrderForUpdateWithProducts(id, user, manager);
 
         // Validaciones de negocio
         this.validateOrderUpdate(order, user);
 
         // Validar campos a actualizar
         await this.validateUpdateData(updateOrderDto, order.customer.id, manager);
+
+        let shouldRecalculateTotal = false;
 
         // Si se cambia la dirección, obtenerla y validarla
         if (updateOrderDto.addressId) {
@@ -434,8 +445,15 @@ export class OrdersService {
         const { addressId, ...updateFields } = updateOrderDto;
         Object.assign(order, updateFields);
         
-        // Guardar cambios
+        // Guardar cambios en la orden
         const updatedOrder = await manager.save(Order, order);
+
+        // Recalcular total si es necesario
+        if (shouldRecalculateTotal) {
+          const newTotal = await this.recalculateOrderTotal(updatedOrder.id, manager);
+          updatedOrder.total = newTotal;
+          await manager.save(Order, updatedOrder);
+        }
 
         // Crear historial de cambio si hay modificaciones significativas
         if (this.hasSignificantChanges(updateOrderDto)) {
@@ -446,7 +464,10 @@ export class OrdersService {
         return await this.getOrderWithRelations(updatedOrder.id, user, manager);
 
       } catch (error) {
-        console.error('Error al actualizar pedido:', error);
+        console.error('Error al actualizar pedido:', {
+          message: error?.message ?? String(error),
+          orderId: id
+        });
         
         if (error instanceof NotFoundException || 
             error instanceof BadRequestException || 
@@ -468,6 +489,33 @@ export class OrdersService {
       .leftJoinAndSelect('order.customer', 'customer')
       .leftJoinAndSelect('order.address', 'address')
       .leftJoinAndSelect('order.user', 'seller')
+      .where('order.id = :id', { id });
+
+    // Filtro por rol de usuario
+    if (user.role === UserRole.SELLER) {
+      queryBuilder.andWhere('order.user.id = :userId', { userId: user.id });
+    }
+
+    const order = await queryBuilder.getOne();
+
+    if (!order) {
+      throw new NotFoundException('Pedido no encontrado');
+    }
+
+    return order;
+  }
+
+  /**
+   * Obtiene el pedido para actualización incluyendo productos
+   */
+  private async getOrderForUpdateWithProducts(id: string, user: User, manager: any): Promise<Order> {
+    const queryBuilder = manager
+      .createQueryBuilder(Order, 'order')
+      .leftJoinAndSelect('order.customer', 'customer')
+      .leftJoinAndSelect('order.address', 'address')
+      .leftJoinAndSelect('order.user', 'seller')
+      .leftJoinAndSelect('order.orderProducts', 'orderProducts')
+      .leftJoinAndSelect('orderProducts.product', 'product')
       .where('order.id = :id', { id });
 
     // Filtro por rol de usuario
@@ -648,5 +696,281 @@ export class OrdersService {
     });
 
     await manager.save(OrderStatusHistory, statusHistory);
+  }
+
+  /**
+   * Recalcula el total de una orden basado en sus productos
+   */
+  private async recalculateOrderTotal(orderId: string, manager: any): Promise<string> {
+    const orderProducts = await manager.find(OrderProduct, {
+      where: { order: { id: orderId } }
+    });
+
+    const total = orderProducts.reduce((sum, op) => {
+      return sum + parseFloat(op.subtotal || '0');
+    }, 0);
+
+    return total.toFixed(2);
+  }
+
+  /**
+   * Calcula costPrice y profit para un producto específico
+   */
+  private calculateProductPricing(
+    unitPrice: number, 
+    quantity: number, 
+    product: Product
+  ): { costPriceValue: string | null; profitValue: string | null } {
+    let costPriceValue: string | null = null;
+    let profitValue: string | null = null;
+    
+    if (product.costPrice !== null && product.costPrice !== undefined) {
+      const parsed = parseFloat(product.costPrice as any);
+      if (!isNaN(parsed)) {
+        costPriceValue = parsed.toFixed(2);
+        
+        // Calcular ganancia: (precio_venta - precio_costo) * cantidad
+        const profitPerUnit = unitPrice - parsed;
+        const totalProfit = profitPerUnit * quantity;
+        profitValue = totalProfit.toFixed(2);
+      }
+    }
+
+    return { costPriceValue, profitValue };
+  }
+
+  // ==================== GESTIÓN DE PRODUCTOS EN ÓRDENES ====================
+
+  /**
+   * Añade un producto a una orden existente
+   */
+  async addProductToOrder(
+    orderId: string, 
+    productData: { productId: string; quantity: number; unitPrice?: number }, 
+    user: User
+  ): Promise<OrderProduct> {
+    return this.dataSource.transaction(async (manager) => {
+      try {
+        // Obtener la orden con productos
+        const order = await this.getOrderForUpdateWithProducts(orderId, user, manager);
+
+        // Validar que se puede editar
+        this.validateOrderUpdate(order, user);
+
+        // Verificar que el producto no esté ya en la orden
+        const existingProduct = order.orderProducts?.find(
+          op => op.product.id === productData.productId
+        );
+
+        if (existingProduct) {
+          throw new BadRequestException('El producto ya existe en este pedido');
+        }
+
+        // Obtener el producto
+        const product = await manager.findOne(Product, {
+          where: { id: productData.productId, isActive: true }
+        });
+
+        if (!product) {
+          throw new NotFoundException('Producto no encontrado o inactivo');
+        }
+
+        // Calcular precios
+        const unitPrice = productData.unitPrice ?? parseFloat(product.price ?? '0');
+        
+        if (unitPrice <= 0) {
+          throw new BadRequestException(`Precio inválido para el producto ${product.name}`);
+        }
+
+        const { costPriceValue, profitValue } = this.calculateProductPricing(
+          unitPrice,
+          productData.quantity,
+          product
+        );
+
+        const subtotal = unitPrice * productData.quantity;
+
+        // Crear el producto de la orden
+        const orderProduct = manager.create(OrderProduct, {
+          order,
+          product,
+          quantity: productData.quantity,
+          unitPrice: unitPrice.toString(),
+          costPrice: costPriceValue,
+          profit: profitValue,
+          subtotal: subtotal.toString(),
+        });
+
+        const savedOrderProduct = await manager.save(OrderProduct, orderProduct);
+
+        // Recalcular total de la orden
+        const newTotal = await this.recalculateOrderTotal(orderId, manager);
+        await manager.update(Order, orderId, { total: newTotal });
+
+        // Crear historial
+        await this.createUpdateStatusHistory(
+          order, 
+          user, 
+          { notes: `Producto añadido: ${product.name} (x${productData.quantity})` } as any,
+          manager
+        );
+
+        return savedOrderProduct;
+
+      } catch (error) {
+        console.error('Error al añadir producto al pedido:', error);
+        
+        if (error instanceof NotFoundException || 
+            error instanceof BadRequestException || 
+            error instanceof ForbiddenException) {
+          throw error;
+        }
+
+        throw new BadRequestException('Error al añadir producto al pedido. Intenta nuevamente.');
+      }
+    });
+  }
+
+  /**
+   * Actualiza un producto específico de una orden
+   */
+  async updateOrderProduct(
+    orderId: string,
+    orderProductId: string,
+    updateData: { quantity?: number; unitPrice?: number },
+    user: User
+  ): Promise<OrderProduct> {
+    return this.dataSource.transaction(async (manager) => {
+      try {
+        // Obtener la orden
+        const order = await this.getOrderForUpdate(orderId, user, manager);
+        this.validateOrderUpdate(order, user);
+
+        // Obtener el producto de la orden
+        const orderProduct = await manager.findOne(OrderProduct, {
+          where: { id: orderProductId, order: { id: orderId } },
+          relations: ['product', 'order']
+        });
+
+        if (!orderProduct) {
+          throw new NotFoundException('Producto no encontrado en este pedido');
+        }
+
+        // Actualizar campos
+        if (updateData.quantity !== undefined) {
+          if (updateData.quantity <= 0) {
+            throw new BadRequestException('La cantidad debe ser mayor a 0');
+          }
+          orderProduct.quantity = updateData.quantity;
+        }
+
+        const unitPrice = updateData.unitPrice !== undefined 
+          ? updateData.unitPrice 
+          : parseFloat(orderProduct.unitPrice);
+
+        if (unitPrice <= 0) {
+          throw new BadRequestException('El precio unitario debe ser mayor a 0');
+        }
+
+        // Recalcular valores
+        const { costPriceValue, profitValue } = this.calculateProductPricing(
+          unitPrice,
+          orderProduct.quantity,
+          orderProduct.product
+        );
+
+        const subtotal = unitPrice * orderProduct.quantity;
+
+        orderProduct.unitPrice = unitPrice.toString();
+        orderProduct.costPrice = costPriceValue;
+        orderProduct.profit = profitValue;
+        orderProduct.subtotal = subtotal.toString();
+
+        const savedOrderProduct = await manager.save(OrderProduct, orderProduct);
+
+        // Recalcular total de la orden
+        const newTotal = await this.recalculateOrderTotal(orderId, manager);
+        await manager.update(Order, orderId, { total: newTotal });
+
+        // Crear historial
+        await this.createUpdateStatusHistory(
+          order,
+          user,
+          { notes: `Producto actualizado: ${orderProduct.product.name}` } as any,
+          manager
+        );
+
+        return savedOrderProduct;
+
+      } catch (error) {
+        console.error('Error al actualizar producto del pedido:', error);
+        
+        if (error instanceof NotFoundException || 
+            error instanceof BadRequestException || 
+            error instanceof ForbiddenException) {
+          throw error;
+        }
+
+        throw new BadRequestException('Error al actualizar producto del pedido. Intenta nuevamente.');
+      }
+    });
+  }
+
+  /**
+   * Elimina un producto de una orden
+   */
+  async removeProductFromOrder(
+    orderId: string,
+    orderProductId: string,
+    user: User
+  ): Promise<void> {
+    return this.dataSource.transaction(async (manager) => {
+      try {
+        // Obtener la orden con productos
+        const order = await this.getOrderForUpdateWithProducts(orderId, user, manager);
+        this.validateOrderUpdate(order, user);
+
+        // Verificar que la orden tenga más de un producto
+        if (order.orderProducts.length <= 1) {
+          throw new BadRequestException('No se puede eliminar el último producto del pedido');
+        }
+
+        // Obtener el producto de la orden
+        const orderProduct = await manager.findOne(OrderProduct, {
+          where: { id: orderProductId, order: { id: orderId } },
+          relations: ['product']
+        });
+
+        if (!orderProduct) {
+          throw new NotFoundException('Producto no encontrado en este pedido');
+        }
+
+        // Eliminar el producto
+        await manager.delete(OrderProduct, orderProductId);
+
+        // Recalcular total de la orden
+        const newTotal = await this.recalculateOrderTotal(orderId, manager);
+        await manager.update(Order, orderId, { total: newTotal });
+
+        // Crear historial
+        await this.createUpdateStatusHistory(
+          order,
+          user,
+          { notes: `Producto eliminado: ${orderProduct.product.name}` } as any,
+          manager
+        );
+
+      } catch (error) {
+        console.error('Error al eliminar producto del pedido:', error);
+        
+        if (error instanceof NotFoundException || 
+            error instanceof BadRequestException || 
+            error instanceof ForbiddenException) {
+          throw error;
+        }
+
+        throw new BadRequestException('Error al eliminar producto del pedido. Intenta nuevamente.');
+      }
+    });
   }
 }

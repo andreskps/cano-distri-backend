@@ -466,6 +466,110 @@ Elimina un producto específico del pedido.
 
 ---
 
+### 4. Añadir Producto a Pedido Existente (Nuevo)
+**POST** `/api/v1/pedidos/:orderId/products`
+
+Añade un nuevo producto a un pedido existente con cálculo automático de costos y ganancias.
+
+#### Path Parameters
+- `orderId` (UUID): ID del pedido
+
+#### Request Body
+```json
+{
+  "productId": "123e4567-e89b-12d3-a456-426614174000",
+  "quantity": 2,
+  "unitPrice": 25.99
+}
+```
+
+**Campos:**
+- `productId` (UUID): ID del producto a añadir
+- `quantity` (number): Cantidad del producto
+- `unitPrice` (number, opcional): Precio unitario personalizado
+
+#### Response - 201 Created
+```json
+{
+  "id": "456e7890-e89b-12d3-a456-426614174001",
+  "quantity": 2,
+  "unitPrice": "25.99",
+  "costPrice": "18.50",
+  "profit": "14.98",
+  "subtotal": "51.98",
+  "product": {
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "name": "Producto Ejemplo",
+    "code": "PE-001",
+    "costPrice": "18.50"
+  },
+  "order": {
+    "id": "orderId",
+    "code": "ORD-2025-001"
+  }
+}
+```
+
+---
+
+### 5. Actualizar Producto en Pedido (Nuevo)
+**PUT** `/api/v1/pedidos/:orderId/products/:productId`
+
+Actualiza cantidad o precio de un producto específico en el pedido.
+
+#### Path Parameters
+- `orderId` (UUID): ID del pedido
+- `productId` (UUID): ID del registro OrderProduct
+
+#### Request Body
+```json
+{
+  "quantity": 5,
+  "unitPrice": 28.50
+}
+```
+
+**Campos (ambos opcionales):**
+- `quantity` (number): Nueva cantidad
+- `unitPrice` (number): Nuevo precio unitario
+
+#### Response - 200 OK
+```json
+{
+  "id": "456e7890-e89b-12d3-a456-426614174001",
+  "quantity": 5,
+  "unitPrice": "28.50",
+  "costPrice": "18.50",
+  "profit": "50.00",
+  "subtotal": "142.50",
+  "product": {
+    "id": "123e4567-e89b-12d3-a456-426614174000",
+    "name": "Producto Ejemplo",
+    "code": "PE-001"
+  }
+}
+```
+
+---
+
+### 6. Eliminar Producto de Pedido (Nuevo)
+**DELETE** `/api/v1/pedidos/:orderId/products/:productId`
+
+Elimina un producto específico de un pedido.
+
+#### Path Parameters
+- `orderId` (UUID): ID del pedido
+- `productId` (UUID): ID del registro OrderProduct
+
+#### Response - 204 No Content
+
+#### Restricciones Adicionales:
+- No se puede eliminar si es el único producto del pedido
+- Solo permitido en pedidos PENDING
+- Administradores pueden editar pedidos de cualquier vendedor
+
+---
+
 ## Gestión de Estados
 
 ### 1. Cambiar Estado del Pedido

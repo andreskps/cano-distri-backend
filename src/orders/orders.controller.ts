@@ -24,10 +24,12 @@ import { OrdersService } from './orders.service';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { GetOrdersQueryDto, OrderResponseDto } from './dto/get-orders.dto';
+import { AddProductToOrderDto, UpdateOrderProductDto } from './dto/order-product-management.dto';
 import { PaginatedResponseDto } from '../common/dto/pagination.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { User } from '../users/entities/user.entity';
+import { OrderProduct } from './entities/order-product.entity';
 import { Order } from './entities/order.entity';
 
 @ApiTags('Pedidos')
@@ -113,5 +115,55 @@ export class OrdersController {
     @GetUser() user: User,
   ): Promise<void> {
     return this.ordersService.remove(id, user);
+  }
+
+  // ==================== GESTIÓN DE PRODUCTOS EN ÓRDENES ====================
+
+  @Post(':id/products')
+  @ApiOperation({ summary: 'Añadir un producto a un pedido existente' })
+  @ApiParam({ name: 'id', description: 'ID del pedido' })
+  @ApiResponse({ 
+    status: 201, 
+    description: 'Producto añadido exitosamente al pedido',
+    type: OrderProduct 
+  })
+  async addProductToOrder(
+    @Param('id', ParseUUIDPipe) orderId: string,
+    @Body() addProductDto: AddProductToOrderDto,
+    @GetUser() user: User,
+  ): Promise<OrderProduct> {
+    return this.ordersService.addProductToOrder(orderId, addProductDto, user);
+  }
+
+  @Put(':id/products/:productId')
+  @ApiOperation({ summary: 'Actualizar un producto específico de un pedido' })
+  @ApiParam({ name: 'id', description: 'ID del pedido' })
+  @ApiParam({ name: 'productId', description: 'ID del producto en el pedido' })
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Producto del pedido actualizado exitosamente',
+    type: OrderProduct 
+  })
+  async updateOrderProduct(
+    @Param('id', ParseUUIDPipe) orderId: string,
+    @Param('productId', ParseUUIDPipe) orderProductId: string,
+    @Body() updateProductDto: UpdateOrderProductDto,
+    @GetUser() user: User,
+  ): Promise<OrderProduct> {
+    return this.ordersService.updateOrderProduct(orderId, orderProductId, updateProductDto, user);
+  }
+
+  @Delete(':id/products/:productId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: 'Eliminar un producto de un pedido' })
+  @ApiParam({ name: 'id', description: 'ID del pedido' })
+  @ApiParam({ name: 'productId', description: 'ID del producto en el pedido' })
+  @ApiResponse({ status: 204, description: 'Producto eliminado del pedido exitosamente' })
+  async removeProductFromOrder(
+    @Param('id', ParseUUIDPipe) orderId: string,
+    @Param('productId', ParseUUIDPipe) orderProductId: string,
+    @GetUser() user: User,
+  ): Promise<void> {
+    return this.ordersService.removeProductFromOrder(orderId, orderProductId, user);
   }
 }
