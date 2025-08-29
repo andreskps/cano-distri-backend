@@ -346,7 +346,11 @@ export class OrdersService {
     }
 
     if (codigo) {
-      queryBuilder.andWhere('order.code ILIKE :codigo', { codigo: `%${codigo}%` });
+      const term = `%${codigo}%`;
+      queryBuilder.andWhere(
+        '(order.code ILIKE :term OR customer.name ILIKE :term OR customer.email ILIKE :term)',
+        { term },
+      );
     }
 
     // Paginación
@@ -360,12 +364,15 @@ export class OrdersService {
 
     return {
       data: orders,
-      page,
-      limit,
-      totalPages,
-      totalItems,
-      hasNextPage: page < totalPages,
-      hasPrevPage: page > 1,
+      meta: {
+        page,
+        limit,
+        totalPages,
+        totalItems,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      },
+  
     };
   }
 

@@ -10,19 +10,23 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
-  ParseUUIDPipe
+  ParseUUIDPipe,
+  UseInterceptors,
+  UploadedFile
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import { ProductsService, PaginatedResponse } from './products.service';
 import { CreateProductDto } from './dto/create-product.dto';
 import { UpdateProductDto } from './dto/update-product.dto';
 import { ProductQueryParams, PaginationDto } from './dto/pagination.dto';
+import { BulkUploadResponseDto } from './dto/bulk-upload-response.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { RolesGuard } from '../auth/guards/roles.guard';
 import { Roles } from '../auth/decorators/roles.decorator';
 import { GetUser } from '../auth/decorators/get-user.decorator';
 import { User, UserRole } from '../users/entities/user.entity';
 import { Product } from './entities/product.entity';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiConsumes } from '@nestjs/swagger';
 import { ProductResponseDto } from './dto/product-response.dto';
 import { PaginatedProductResponseDto } from './dto/paginated-product-response.dto';
 
@@ -111,6 +115,41 @@ export class ProductsController {
     @GetUser() user: User,
   ): Promise<void> {
     return this.productsService.remove(id, user);
+  }
+
+  @Post('bulk-upload')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN) // Solo administradores pueden hacer carga masiva
+  @UseInterceptors(FileInterceptor('file'))
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ 
+    summary: 'Carga masiva de productos desde Excel (solo admin)',
+    description: `
+    Carga múltiples productos desde un archivo Excel.
+    
+    **Formato del archivo:**
+    - Debe ser un archivo .xlsx o .xls
+    - Primera fila debe contener los encabezados
+    - Columnas requeridas: name, code
+    - Columnas opcionales: price, costPrice, unit, notes
+    
+    **Ejemplo de encabezados:**
+    | name | code | price | costPrice | unit | notes |
+    |------|------|-------|-----------|------|-------|
+    | Coca Cola 600ml | CC-600 | 25.50 | 18.00 | unidad | Bebida gaseosa |
+    `
+  })
+  @ApiConsumes('multipart/form-data')
+  @ApiResponse({ 
+    status: 200, 
+    description: 'Resultado de la carga masiva', 
+    type: BulkUploadResponseDto 
+  })
+  async bulkUpload(
+    @UploadedFile() file: Express.Multer.File,
+    @GetUser() user: User,
+  ): Promise<BulkUploadResponseDto> {
+    return this.productsService.bulkUpload(file, user);
   }
 
   @Get('by-code/:code')
