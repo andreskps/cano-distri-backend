@@ -4,6 +4,7 @@ import {
   Post, 
   Body, 
   Put, 
+  Patch,
   Param, 
   Delete, 
   Query,
@@ -25,6 +26,8 @@ import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { GetOrdersQueryDto, OrderResponseDto } from './dto/get-orders.dto';
 import { AddProductToOrderDto, UpdateOrderProductDto } from './dto/order-product-management.dto';
+import { ChangeOrderStatusDto, UpdatePaymentStatusDto } from './dto/order-status.dto';
+import { OrderStatusService } from './services/order-status.service';
 import { PaginatedResponseDto } from '../common/dto/pagination.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { GetUser } from '../auth/decorators/get-user.decorator';
@@ -37,7 +40,10 @@ import { Order } from './entities/order.entity';
 @Controller('pedidos')
 @UseGuards(JwtAuthGuard)
 export class OrdersController {
-  constructor(private readonly ordersService: OrdersService) {}
+  constructor(
+    private readonly ordersService: OrdersService,
+    private readonly orderStatusService: OrderStatusService,
+  ) {}
 
   @Post()
   @HttpCode(HttpStatus.CREATED)
@@ -165,5 +171,42 @@ export class OrdersController {
     @GetUser() user: User,
   ): Promise<void> {
     return this.ordersService.removeProductFromOrder(orderId, orderProductId, user);
+  }
+
+  // ==================== PROXY: GESTIÓN DE ESTADOS (usa OrderStatusService) ====================
+
+  @Patch(':id/status')
+  @ApiOperation({ summary: 'Cambiar estado del pedido (proxy)' })
+  @ApiParam({ name: 'id', description: 'ID del pedido' })
+  @ApiResponse({ status: 200, description: 'Estado del pedido actualizado' })
+  async changeOrderStatusProxy(
+    @Param('id', ParseUUIDPipe) orderId: string,
+    @Body() changeStatusDto: ChangeOrderStatusDto,
+    @GetUser() user: User,
+  ) {
+    return this.orderStatusService.changeOrderStatus(orderId, changeStatusDto, user);
+  }
+
+  @Patch(':id/payment')
+  @ApiOperation({ summary: 'Actualizar estado del pago (proxy)' })
+  @ApiParam({ name: 'id', description: 'ID del pedido' })
+  @ApiResponse({ status: 200, description: 'Estado del pago actualizado' })
+  async updatePaymentStatusProxy(
+    @Param('id', ParseUUIDPipe) orderId: string,
+    @Body() updatePaymentDto: UpdatePaymentStatusDto,
+    @GetUser() user: User,
+  ) {
+    return this.orderStatusService.updatePaymentStatus(orderId, updatePaymentDto, user);
+  }
+
+  @Get(':id/status-history')
+  @ApiOperation({ summary: 'Obtener historial de estados del pedido (proxy)' })
+  @ApiParam({ name: 'id', description: 'ID del pedido' })
+  @ApiResponse({ status: 200, description: 'Historial de estados del pedido' })
+  async getOrderStatusHistoryProxy(
+    @Param('id', ParseUUIDPipe) orderId: string,
+    @GetUser() user: User,
+  ) {
+    return this.orderStatusService.getOrderStatusHistory(orderId, user);
   }
 }

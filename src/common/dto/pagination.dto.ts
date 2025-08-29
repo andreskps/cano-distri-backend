@@ -19,14 +19,12 @@ export class PaginationDto {
     example: 10,
     description: 'Cantidad de elementos por página (entre 1 y 100)',
     minimum: 1,
-    maximum: 100,
   })
   @IsOptional()
   @Type(() => Number)
   @IsInt()
   @IsPositive()
   @Min(1)
-  @Max(100)
   limit?: number = 10;
 }
 
