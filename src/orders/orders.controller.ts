@@ -27,6 +27,7 @@ import { UpdateOrderDto } from './dto/update-order.dto';
 import { GetOrdersQueryDto, OrderResponseDto } from './dto/get-orders.dto';
 import { AddProductToOrderDto, UpdateOrderProductDto } from './dto/order-product-management.dto';
 import { ChangeOrderStatusDto, UpdatePaymentStatusDto } from './dto/order-status.dto';
+import { LogisticsQueryDto, LogisticsResponseDto } from './dto/logistics.dto';
 import { OrderStatusService } from './services/order-status.service';
 import { PaginatedResponseDto } from '../common/dto/pagination.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
@@ -78,6 +79,37 @@ export class OrdersController {
     @GetUser() user: User,
   ): Promise<PaginatedResponseDto<Order>> {
     return this.ordersService.findAll(query, user);
+  }
+
+    // ==================== LOGÍSTICA Y CARGUE ====================
+
+  @Get('logistica')
+  @ApiOperation({ 
+    summary: 'Obtener información de logística por fecha de entrega',
+    description: 'Consolida productos y cantidades para una fecha específica de entrega. Útil para planificación logística y preparación de cargue.'
+  })
+  @ApiQuery({ 
+    name: 'deliveryDate', 
+    required: true, 
+    description: 'Fecha de entrega (YYYY-MM-DD)', 
+    example: '2025-09-06' 
+  })
+  @ApiQuery({ 
+    name: 'status', 
+    required: false, 
+    description: 'Filtrar por estado específico', 
+    enum: ['pending', 'delivered', 'cancelled'] 
+  })
+  @ApiResponse({
+    status: 200,
+    description: 'Información de logística consolidada',
+    type: LogisticsResponseDto,
+  })
+  async getLogisticsForDate(
+    @Query() query: LogisticsQueryDto,
+    @GetUser() user: User,
+  ): Promise<LogisticsResponseDto> {
+    return this.ordersService.getLogisticsForDate(query, user);
   }
 
   @Get(':id')
@@ -209,4 +241,6 @@ export class OrdersController {
   ) {
     return this.orderStatusService.getOrderStatusHistory(orderId, user);
   }
+
+
 }

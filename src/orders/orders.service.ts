@@ -9,6 +9,7 @@ import { Repository, Between, Like, DataSource } from 'typeorm';
 import { CreateOrderDto } from './dto/create-order.dto';
 import { UpdateOrderDto } from './dto/update-order.dto';
 import { GetOrdersQueryDto } from './dto/get-orders.dto';
+import { LogisticsQueryDto, LogisticsResponseDto, ProductLogisticsDto, OrderLogisticsDto } from './dto/logistics.dto';
 import { PaginatedResponseDto } from '../common/dto/pagination.dto';
 import { Order } from './entities/order.entity';
 import { OrderProduct } from './entities/order-product.entity';
@@ -16,9 +17,8 @@ import { OrderStatusHistory } from './entities/order-status-history.entity';
 import { Product } from '../products/entities/product.entity';
 import { Customer } from '../customers/entities/customer.entity';
 import { CustomerAddress } from '../customers/entities/customer-address.entity';
-import { User } from '../users/entities/user.entity';
+import { User, UserRole } from '../users/entities/user.entity';
 import { OrderStatus } from './entities/order-status.enum';
-import { UserRole } from '../users/entities/user.entity';
 import { OrderCodeService } from './services/order-code.service';
 
 @Injectable()
@@ -972,5 +972,149 @@ export class OrdersService {
         throw new BadRequestException('Error al eliminar producto del pedido. Intenta nuevamente.');
       }
     });
+  }
+
+  // ==================== LOGÍSTICA Y CARGUE ====================
+
+  /**
+   * Obtiene información de logística para una fecha específica
+   * Consolida productos y cantidades por fecha de entrega
+   */
+  async getLogisticsForDate(query: LogisticsQueryDto, user: User): Promise<LogisticsResponseDto> {
+    try {
+     
+
+      // Construir filtros base
+      const whereConditions: any = {
+        deliveryDate: query.deliveryDate,
+      };
+
+      // Si no es admin, solo ver sus propios pedidos
+      if (user.role !== UserRole.ADMIN) {
+        whereConditions.user = { id: user.id };
+      }
+
+      // Filtro por estado si se especifica
+      if (query.status) {
+        whereConditions.status = query.status;
+      }
+
+      // Obtener órdenes con relaciones necesarias
+      const orders = await this.orderRepository.find({
+        where: whereConditions,
+        relations: [
+          'customer',
+          'address',
+          'orderProducts',
+          'orderProducts.product',
+          'user'
+        ],
+        order: {
+          createdAt: 'ASC'
+        }
+      });
+
+
+      // Consolidar productos
+      const productConsolidation = new Map<string, {
+        product: Product;
+        totalQuantity: number;
+        orderCount: number;
+        totalValue: number;
+        prices: number[];
+      }>();
+
+      // Procesar cada orden
+      const orderDetails: OrderLogisticsDto[] = [];
+
+      for (const order of orders) {
+        // Procesar productos de esta orden
+        const orderProducts = order.orderProducts.map(op => ({
+          productId: op.product.id,
+          productName: op.product.name,
+          productCode: op.product.code,
+          quantity: op.quantity,
+          unitPrice: parseFloat(op.unitPrice),
+          subtotal: parseFloat(op.subtotal)
+        }));
+
+        // Agregar al detalle de órdenes
+        orderDetails.push({
+          orderId: order.id,
+          orderCode: order.code,
+          customerName: order.customer.name,
+          deliveryAddress: order.address?.address || order.customer.addresses?.[0]?.address || 'Sin dirección',
+          orderTotal: parseFloat(order.total),
+          status: order.status,
+          notes: order.notes || undefined,
+          products: orderProducts
+        });
+
+        // Consolidar productos
+        for (const op of order.orderProducts) {
+          const productId = op.product.id;
+          const unitPrice = parseFloat(op.unitPrice);
+          const quantity = op.quantity;
+          const subtotal = parseFloat(op.subtotal);
+
+          if (productConsolidation.has(productId)) {
+            const existing = productConsolidation.get(productId)!;
+            existing.totalQuantity += quantity;
+            existing.orderCount += 1;
+            existing.totalValue += subtotal;
+            existing.prices.push(unitPrice);
+          } else {
+            productConsolidation.set(productId, {
+              product: op.product,
+              totalQuantity: quantity,
+              orderCount: 1,
+              totalValue: subtotal,
+              prices: [unitPrice]
+            });
+          }
+        }
+      }
+
+      // Convertir consolidación a array de DTOs
+      const consolidatedProducts: ProductLogisticsDto[] = Array.from(productConsolidation.entries())
+        .map(([productId, data]) => ({
+          productId,
+          productName: data.product.name,
+          productCode: data.product.code,
+          totalQuantity: data.totalQuantity,
+          orderCount: data.orderCount,
+          averagePrice: Math.round((data.prices.reduce((sum, price) => sum + price, 0) / data.prices.length) * 100) / 100,
+          totalValue: Math.round(data.totalValue * 100) / 100,
+          unit: data.product.unit || 'unidad'
+        }))
+        .sort((a, b) => b.totalQuantity - a.totalQuantity); // Ordenar por cantidad desc
+
+      // Calcular resumen
+      const summary = {
+        totalOrders: orders.length,
+        totalProducts: consolidatedProducts.reduce((sum, p) => sum + p.totalQuantity, 0),
+        totalValue: Math.round(consolidatedProducts.reduce((sum, p) => sum + p.totalValue, 0) * 100) / 100,
+        uniqueProducts: consolidatedProducts.length
+      };
+
+
+      return {
+        deliveryDate: query.deliveryDate,
+        consolidatedProducts,
+        orders: orderDetails,
+        summary
+      };
+
+    } catch (error) {
+      console.error('Error al obtener logística:', error);
+      
+      if (error instanceof NotFoundException || 
+          error instanceof BadRequestException || 
+          error instanceof ForbiddenException) {
+        throw error;
+      }
+
+      throw new BadRequestException('Error al obtener información de logística. Intenta nuevamente.');
+    }
   }
 }
