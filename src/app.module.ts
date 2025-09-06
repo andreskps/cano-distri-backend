@@ -15,14 +15,13 @@ import { StatsModule } from './stats/stats.module';
     ConfigModule.forRoot({ isGlobal: true }),
     TypeOrmModule.forRoot({
       type: 'postgres',
-      host: process.env.DB_HOST || 'localhost',
-      port: parseInt(process.env.DB_PORT || '5435', 10),
+      host: process.env.DB_HOST || 'db',
+      port: parseInt(process.env.DB_PORT || '5432', 10),
       username: process.env.POSTGRES_USER,
       password: process.env.POSTGRES_PASSWORD,
       database: process.env.POSTGRES_DB,
       autoLoadEntities: true,
-      synchronize: true,
-      // synchronize: process.env.TYPEORM_SYNC ? process.env.TYPEORM_SYNC === 'true' : false,
+      synchronize: process.env.TYPEORM_SYNC === 'true',
       // extra: { ssl: false }, // configure SSL if needed
     }),
     UsersModule,
