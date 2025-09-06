@@ -38,6 +38,9 @@ export class Customer {
   @Column({ type: 'text', nullable: true })
   notes: string | null;
 
+  @Column({ type: 'boolean', default: true })
+  isActive: boolean;
+
   @OneToMany(() => CustomerAddress, (address) => address.customer, {
     cascade: true,
   })

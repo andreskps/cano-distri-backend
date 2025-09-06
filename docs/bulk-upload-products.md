@@ -123,7 +123,6 @@ const response = await fetch('/api/v1/products/bulk-upload', {
 });
 
 const result = await response.json();
-console.log(`${result.successCount} productos creados exitosamente`);
 ```
 
 ### Recomendaciones

@@ -36,14 +36,13 @@ export class StatsService {
 
   async getStats(query: StatsQueryDto, user: User): Promise<StatsResponseDto> {
     try {
-      this.logger.log(`Obteniendo estadísticas para usuario ${user.id} con query: ${JSON.stringify(query)}`);
-
+    
       const { startDate, endDate } = this.getDateRange(query);
-      this.logger.log(`Rango de fechas calculado: ${startDate} a ${endDate}`);
+   ;
 
       // Construir filtros base
       const baseWhereClause = this.buildBaseWhereClause(query, user, startDate, endDate);
-      this.logger.log(`Cláusula WHERE construida: ${baseWhereClause}`);
+
 
       const [
         salesStats,
@@ -59,7 +58,6 @@ export class StatsService {
         this.getSalesOverTime(baseWhereClause),
       ]);
 
-      this.logger.log('Todas las estadísticas obtenidas exitosamente');
 
       return {
         salesStats,
@@ -100,7 +98,7 @@ export class StatsService {
           throw new BadRequestException('La fecha de inicio debe ser menor que la fecha de fin');
         }
 
-        this.logger.log(`Usando fechas personalizadas: ${query.startDate} a ${query.endDate}`);
+  
         return {
           startDate: query.startDate,
           endDate: query.endDate,
@@ -108,12 +106,11 @@ export class StatsService {
       }
 
       if (query.period) {
-        this.logger.log(`Usando período predefinido: ${query.period}`);
+    
         return this.getPredefinedPeriod(query.period);
       }
 
-      // Por defecto: último mes
-      this.logger.log('Usando período por defecto: último mes');
+  
       const endDate = new Date();
       const startDate = new Date();
       startDate.setMonth(startDate.getMonth() - 1);
@@ -165,7 +162,6 @@ export class StatsService {
         endDate: endDate.toISOString().split('T')[0],
       };
 
-      this.logger.log(`Período ${period} calculado: ${result.startDate} a ${result.endDate}`);
       return result;
     } catch (error) {
       this.logger.error(`Error al calcular período predefinido: ${error.message}`);
@@ -188,7 +184,7 @@ export class StatsService {
 
       // Si no es admin, solo ver sus propios pedidos
       if (user.role !== UserRole.ADMIN && query.sellerId) {
-        this.logger.warn(`Usuario no admin (${user.id}) intentando filtrar por vendedor ${query.sellerId}`);
+
         conditions.push(`o."userId" = '${query.sellerId}'`);
       } else if (user.role !== UserRole.ADMIN) {
         conditions.push(`o."userId" = '${user.id}'`);
@@ -204,7 +200,7 @@ export class StatsService {
       }
 
       const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
-      this.logger.log(`Cláusula WHERE construida: ${whereClause}`);
+      
       
       return whereClause;
     } catch (error) {
@@ -215,8 +211,6 @@ export class StatsService {
 
   private async getSalesStats(whereClause: string): Promise<SalesStatsDto> {
     try {
-      this.logger.log('Obteniendo estadísticas de ventas...');
-      
       const query = `
         SELECT 
           COUNT(o.id) as total_orders,
@@ -229,11 +223,11 @@ export class StatsService {
         ${whereClause}
       `;
 
-      this.logger.log(`Ejecutando query de ventas: ${query}`);
+
       const salesResult = await this.orderRepository.query(query);
       
       if (!salesResult || salesResult.length === 0) {
-        this.logger.warn('No se encontraron resultados en query de ventas');
+       
         salesResult.push({
           total_orders: 0,
           delivered_orders: 0,
@@ -245,7 +239,7 @@ export class StatsService {
       }
 
       const sales = salesResult[0];
-      this.logger.log(`Resultados de ventas: ${JSON.stringify(sales)}`);
+
 
       // Consultar costos y ganancias desde order_products
       const costsQuery = `
@@ -258,11 +252,10 @@ export class StatsService {
         ${whereClause.replace('WHERE', 'WHERE o.status = \'delivered\' AND')}
       `;
 
-      this.logger.log(`Ejecutando query de costos: ${costsQuery}`);
+
       const costsResult = await this.orderRepository.query(costsQuery);
       
       if (!costsResult || costsResult.length === 0) {
-        this.logger.warn('No se encontraron resultados en query de costos');
         costsResult.push({
           total_costs: 0,
           total_profit: 0,
@@ -271,7 +264,6 @@ export class StatsService {
       }
 
       const costs = costsResult[0];
-      this.logger.log(`Resultados de costos: ${JSON.stringify(costs)}`);
 
       const totalSales = parseFloat(sales.total_sales) || 0;
       const totalCosts = parseFloat(costs.total_costs) || 0;
@@ -290,7 +282,6 @@ export class StatsService {
         totalProductsSold: parseInt(costs.total_products_sold) || 0,
       };
 
-      this.logger.log(`Estadísticas de ventas calculadas: ${JSON.stringify(result)}`);
       return result;
 
     } catch (error) {
@@ -301,8 +292,6 @@ export class StatsService {
 
   private async getTopProducts(whereClause: string): Promise<TopProductDto[]> {
     try {
-      this.logger.log('Obteniendo top productos...');
-      
       const query = `
         SELECT 
           p.id as product_id,
@@ -320,7 +309,6 @@ export class StatsService {
         LIMIT 10
       `;
 
-      this.logger.log(`Ejecutando query de top productos: ${query}`);
       const result = await this.orderRepository.query(query);
 
       const topProducts = result.map((row: any) => ({
@@ -332,7 +320,6 @@ export class StatsService {
         totalProfit: Math.round((parseFloat(row.total_profit) || 0) * 100) / 100,
       }));
 
-      this.logger.log(`Top productos obtenidos: ${topProducts.length} elementos`);
       return topProducts;
 
     } catch (error) {
@@ -343,8 +330,6 @@ export class StatsService {
 
   private async getTopCustomers(whereClause: string): Promise<TopCustomerDto[]> {
     try {
-      this.logger.log('Obteniendo top clientes...');
-      
       const query = `
         SELECT 
           c.id as customer_id,
@@ -361,7 +346,6 @@ export class StatsService {
         LIMIT 10
       `;
 
-      this.logger.log(`Ejecutando query de top clientes: ${query}`);
       const result = await this.orderRepository.query(query);
 
       const topCustomers = result.map((row: any) => ({
@@ -373,7 +357,6 @@ export class StatsService {
         lastOrderDate: new Date(row.last_order_date).toISOString().split('T')[0],
       }));
 
-      this.logger.log(`Top clientes obtenidos: ${topCustomers.length} elementos`);
       return topCustomers;
 
     } catch (error) {
@@ -384,13 +367,10 @@ export class StatsService {
 
   private async getSellerStats(whereClause: string, user: User): Promise<SellerStatsDto[]> {
     try {
-      this.logger.log('Obteniendo estadísticas de vendedores...');
-      
       // Si no es admin, solo retornar sus propias estadísticas
       let userFilter = '';
       if (user.role !== UserRole.ADMIN) {
-        userFilter = `AND u.id = '${user.id}'`;
-        this.logger.log(`Usuario no admin, filtrando por ID: ${user.id}`);
+  userFilter = `AND u.id = '${user.id}'`;
       }
 
       const query = `
@@ -409,7 +389,6 @@ export class StatsService {
         ORDER BY total_sales DESC
       `;
 
-      this.logger.log(`Ejecutando query de vendedores: ${query}`);
       const result = await this.orderRepository.query(query);
 
       const sellerStats = result.map((row: any) => ({
@@ -421,7 +400,6 @@ export class StatsService {
         totalProfit: Math.round((parseFloat(row.total_profit) || 0) * 100) / 100,
       }));
 
-      this.logger.log(`Estadísticas de vendedores obtenidas: ${sellerStats.length} elementos`);
       return sellerStats;
 
     } catch (error) {
@@ -432,8 +410,6 @@ export class StatsService {
 
   private async getSalesOverTime(whereClause: string): Promise<SalesOverTimeDto[]> {
     try {
-      this.logger.log('Obteniendo ventas a lo largo del tiempo...');
-      
       const query = `
         SELECT 
           DATE(o."createdAt") as date,
@@ -447,7 +423,6 @@ export class StatsService {
         ORDER BY date ASC
       `;
 
-      this.logger.log(`Ejecutando query de ventas temporales: ${query}`);
       const result = await this.orderRepository.query(query);
 
       const salesOverTime = result.map((row: any) => ({
@@ -457,7 +432,6 @@ export class StatsService {
         totalProfit: Math.round((parseFloat(row.total_profit) || 0) * 100) / 100,
       }));
 
-      this.logger.log(`Ventas temporales obtenidas: ${salesOverTime.length} elementos`);
       return salesOverTime;
 
     } catch (error) {

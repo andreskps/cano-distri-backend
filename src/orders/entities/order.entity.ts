@@ -45,6 +45,10 @@ export class Order {
   @Column({ type: 'boolean', default: false })
   isPaid: boolean;
 
+  @Column({ type: 'boolean', default: true })
+  isActive: boolean;
+
+
   @OneToMany(() => OrderProduct, (op) => op.order, { cascade: true })
   orderProducts: OrderProduct[];
 

@@ -99,11 +99,13 @@ export class CustomersService {
     const queryBuilder = this.customerRepository
       .createQueryBuilder('customer')
       .leftJoinAndSelect('customer.seller', 'seller')
-      .leftJoinAndSelect('customer.addresses', 'addresses');
+      .leftJoinAndSelect('customer.addresses', 'addresses')
+      // Siempre filtrar solo clientes activos
+      .where('customer.isActive = :isActive', { isActive: true });
 
-    // Si es vendedor, solo ve sus clientes
+    // Si es vendedor, solo ve sus clientes (añadir condición)
     if (user.role === UserRole.SELLER) {
-      queryBuilder.where('customer.seller.id = :sellerId', { sellerId: user.id });
+      queryBuilder.andWhere('customer.seller.id = :sellerId', { sellerId: user.id });
     }
 
     // Agregar búsqueda si está presente
@@ -115,11 +117,8 @@ export class CustomersService {
          customer.phone ILIKE :searchTerm )
       `;
       
-      if (user.role === UserRole.SELLER) {
-        queryBuilder.andWhere(searchCondition, { searchTerm });
-      } else {
-        queryBuilder.where(searchCondition, { searchTerm });
-      }
+  // Añadir condición de búsqueda sin sobrescribir el filtro de isActive
+  queryBuilder.andWhere(searchCondition, { searchTerm });
     }
 
     const [customers, total] = await queryBuilder
@@ -148,7 +147,8 @@ export class CustomersService {
       .createQueryBuilder('customer')
       .leftJoinAndSelect('customer.seller', 'seller')
       .leftJoinAndSelect('customer.addresses', 'addresses')
-      .where('customer.id = :id', { id });
+      .where('customer.id = :id', { id })
+      .andWhere('customer.isActive = :isActive', { isActive: true });
 
     // Si es vendedor, verificar que el cliente le pertenece
     if (user.role === UserRole.SELLER) {
@@ -189,12 +189,12 @@ export class CustomersService {
 
     // Soft delete: marcar como inactivo (podríamos añadir campo isActive a Customer)
     // Por ahora, eliminación física para administradores
-    await this.customerRepository.delete(id);
+    await this.customerRepository.update(id, { isActive: false });
   }
 
   async findByEmail(email: string): Promise<Customer | null> {
     return await this.customerRepository.findOne({
-      where: { email },
+      where: { email, isActive: true },
       relations: ['seller', 'addresses'],
     });
   }
@@ -204,7 +204,7 @@ export class CustomersService {
     const skip = (page - 1) * limit;
 
     const [customers, total] = await this.customerRepository.findAndCount({
-      where: { seller: { id: sellerId } },
+      where: { seller: { id: sellerId }, isActive: true },
       relations: ['seller', 'addresses'],
       skip,
       take: limit,
