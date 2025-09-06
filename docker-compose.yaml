@@ -1,24 +1,84 @@
 version: '3.8'
+
 services:
+  # Base de datos PostgreSQL
   db:
     image: postgres:15-alpine
-    restart: always
-    env_file:
-      - .env
+    restart: unless-stopped
     environment:
-      - POSTGRES_USER=${POSTGRES_USER}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - POSTGRES_DB=${POSTGRES_DB}
-    ports:
-      - "5435:5432"
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      TZ: America/Bogota
     volumes:
       - db_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    networks:
+      - internal
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB} -h localhost"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
       timeout: 5s
       retries: 5
-      start_period: 10s
+      start_period: 30s
+
+  # Aplicación NestJS
+  api:
+    build: .
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRATION_TIME: ${JWT_EXPIRATION_TIME}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
+      JWT_REFRESH_EXPIRATION_TIME: ${JWT_REFRESH_EXPIRATION_TIME}
+      BCRYPT_SALT_ROUNDS: ${BCRYPT_SALT_ROUNDS}
+      PORT: 3000
+      NODE_ENV: production
+      TZ: America/Bogota
+      TYPEORM_SYNC: ${TYPEORM_SYNC}
+    networks:
+      - internal
+      - nginx-proxy-manager
+    labels:
+      # Labels para Nginx Proxy Manager
+      - "traefik.enable=false"
+
+  # Servicio de backup automático
+  backup:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      BACKUP_SCHEDULE: "0 3 * * *"
+      BACKUP_KEEP_DAYS: 7
+      TZ: America/Bogota
+    volumes:
+      - ./backups:/backups
+      - ./scripts:/scripts:ro
+    networks:
+      - internal
+    command: sh -c "
+      apk add --no-cache dcron &&
+      echo '$${BACKUP_SCHEDULE} cd /scripts && sh backup.sh' > /etc/crontabs/root &&
+      crond -f -d 8"
 
 volumes:
   db_data:
+    driver: local
+
+networks:
+  internal:
+    driver: bridge
+  nginx-proxy-manager:
+    external: true
