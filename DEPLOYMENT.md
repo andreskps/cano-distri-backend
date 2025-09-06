@@ -206,6 +206,19 @@ docker-compose down
 docker-compose up --build -d
 ```
 
+### Error "ECONNREFUSED" con puerto incorrecto
+
+Si ves errores como `connect ECONNREFUSED 127.0.0.1:5435`:
+
+1. Verificar que `DB_PORT=5432` en el archivo `.env`
+2. Verificar que `DB_HOST=db` en el archivo `.env`
+3. Reconstruir la aplicación:
+
+```bash
+docker-compose down
+docker-compose up --build -d
+```
+
 ### Problemas de conexión a la base de datos
 
 ```bash

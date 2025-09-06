@@ -4,6 +4,7 @@ services:
   # Base de datos PostgreSQL
   db:
     image: postgres:15-alpine
+    container_name: cano-distri-backend-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
@@ -25,6 +26,7 @@ services:
   # Aplicación NestJS
   api:
     build: .
+    container_name: cano-distri-backend-api
     restart: unless-stopped
     depends_on:
       db:
@@ -48,13 +50,17 @@ services:
     networks:
       - internal
       - nginx-proxy-manager
-    labels:
-      # Labels para Nginx Proxy Manager
-      - "traefik.enable=false"
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   # Servicio de backup automático
   backup:
     image: postgres:15-alpine
+    container_name: cano-distri-backend-backup
     restart: unless-stopped
     depends_on:
       - db
