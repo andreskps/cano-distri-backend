@@ -7,12 +7,22 @@ import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-
   console.log('🚀 FRONTEND_URL:', process.env.FRONTEND_URL);
 
   // Configurar CORS
   app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3001',
+    origin: (origin, callback) => {
+      const allowedOrigins = [
+        'https://cano-distri-front.vercel.app',
+        'http://localhost:3001',
+      ];
+
+      if (!origin || allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true,
   });
 
@@ -45,6 +55,5 @@ async function bootstrap() {
 
   const port = process.env.PORT || 3000;
   await app.listen(port);
-  
 }
 bootstrap();
