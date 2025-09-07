@@ -21,7 +21,7 @@ import { StatsModule } from './stats/stats.module';
       password: process.env.POSTGRES_PASSWORD,
       database: process.env.POSTGRES_DB,
       autoLoadEntities: true,
-      synchronize: process.env.TYPEORM_SYNC === 'true',
+      synchronize: true
       // extra: { ssl: false }, // configure SSL if needed
     }),
     UsersModule,
