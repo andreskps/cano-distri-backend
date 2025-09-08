@@ -16,6 +16,8 @@ services:
       - ./backups:/backups
     networks:
       - internal
+    ports:
+      - "5432:5432" # para acceso externo si es necesario
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 10s
@@ -47,9 +49,11 @@ services:
       NODE_ENV: production
       TZ: America/Bogota
       TYPEORM_SYNC: ${TYPEORM_SYNC}
+    expose:
+      - "3000" # para que NPM lo vea internamente sin publicar el puerto
     networks:
       - internal
-      - nginx-proxy-manager
+      - nginx-proxy
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1"]
       interval: 30s
@@ -68,18 +72,13 @@ services:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
-      BACKUP_SCHEDULE: "0 3 * * *"
-      BACKUP_KEEP_DAYS: 7
       TZ: America/Bogota
     volumes:
       - ./backups:/backups
       - ./scripts:/scripts:ro
     networks:
       - internal
-    command: sh -c "
-      apk add --no-cache dcron &&
-      echo '$${BACKUP_SCHEDULE} cd /scripts && sh backup.sh' > /etc/crontabs/root &&
-      crond -f -d 8"
+    command: sh /scripts/backup.sh
 
 volumes:
   db_data:
@@ -88,5 +87,5 @@ volumes:
 networks:
   internal:
     driver: bridge
-  nginx-proxy-manager:
+  nginx-proxy:
     external: true
