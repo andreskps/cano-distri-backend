@@ -334,7 +334,9 @@ export class OrdersService {
       .leftJoinAndSelect('order.address', 'address')
       .leftJoinAndSelect('order.user', 'seller')
       .leftJoinAndSelect('order.orderProducts', 'orderProducts')
-      .leftJoinAndSelect('orderProducts.product', 'product');
+      .leftJoinAndSelect('orderProducts.product', 'product')
+      // Filtrar pedidos cancelados
+      .where('order.status != :cancelledStatus', { cancelledStatus: OrderStatus.CANCELLED });
 
     // Filtro por rol de usuario
     if (user.role === UserRole.SELLER) {
@@ -395,7 +397,9 @@ export class OrdersService {
       .leftJoinAndSelect('orderProducts.product', 'product')
       .leftJoinAndSelect('order.statusHistory', 'statusHistory')
       .leftJoinAndSelect('statusHistory.user', 'statusUser')
-      .where('order.id = :id', { id });
+      .where('order.id = :id', { id })
+      // Filtrar pedidos cancelados
+      .andWhere('order.status != :cancelledStatus', { cancelledStatus: OrderStatus.CANCELLED });
 
     // Filtro por rol de usuario
     if (user.role === UserRole.SELLER) {
@@ -484,19 +488,19 @@ export class OrdersService {
    * Obtiene el pedido para actualización con validaciones
    */
   private async getOrderForUpdate(id: string, user: User, manager: any): Promise<Order> {
-    const queryBuilder = manager
-      .createQueryBuilder(Order, 'order')
-      .leftJoinAndSelect('order.customer', 'customer')
-      .leftJoinAndSelect('order.address', 'address')
-      .leftJoinAndSelect('order.user', 'seller')
-      .where('order.id = :id', { id });
+      const queryBuilder = manager
+        .createQueryBuilder(Order, 'order')
+        .leftJoinAndSelect('order.customer', 'customer')
+        .leftJoinAndSelect('order.address', 'address')
+        .leftJoinAndSelect('order.user', 'seller')
+        .where('order.id = :id', { id })
+        // Filtrar pedidos cancelados
+        .andWhere('order.status != :cancelledStatus', { cancelledStatus: OrderStatus.CANCELLED });
 
-    // Filtro por rol de usuario
-    if (user.role === UserRole.SELLER) {
-      queryBuilder.andWhere('order.user.id = :userId', { userId: user.id });
-    }
-
-    const order = await queryBuilder.getOne();
+      // Filtro por rol de usuario
+      if (user.role === UserRole.SELLER) {
+        queryBuilder.andWhere('order.user.id = :userId', { userId: user.id });
+      }    const order = await queryBuilder.getOne();
 
     if (!order) {
       throw new NotFoundException('Pedido no encontrado');
@@ -509,21 +513,21 @@ export class OrdersService {
    * Obtiene el pedido para actualización incluyendo productos
    */
   private async getOrderForUpdateWithProducts(id: string, user: User, manager: any): Promise<Order> {
-    const queryBuilder = manager
-      .createQueryBuilder(Order, 'order')
-      .leftJoinAndSelect('order.customer', 'customer')
-      .leftJoinAndSelect('order.address', 'address')
-      .leftJoinAndSelect('order.user', 'seller')
-      .leftJoinAndSelect('order.orderProducts', 'orderProducts')
-      .leftJoinAndSelect('orderProducts.product', 'product')
-      .where('order.id = :id', { id });
+      const queryBuilder = manager
+        .createQueryBuilder(Order, 'order')
+        .leftJoinAndSelect('order.customer', 'customer')
+        .leftJoinAndSelect('order.address', 'address')
+        .leftJoinAndSelect('order.user', 'seller')
+        .leftJoinAndSelect('order.orderProducts', 'orderProducts')
+        .leftJoinAndSelect('orderProducts.product', 'product')
+        .where('order.id = :id', { id })
+        // Filtrar pedidos cancelados
+        .andWhere('order.status != :cancelledStatus', { cancelledStatus: OrderStatus.CANCELLED });
 
-    // Filtro por rol de usuario
-    if (user.role === UserRole.SELLER) {
-      queryBuilder.andWhere('order.user.id = :userId', { userId: user.id });
-    }
-
-    const order = await queryBuilder.getOne();
+      // Filtro por rol de usuario
+      if (user.role === UserRole.SELLER) {
+        queryBuilder.andWhere('order.user.id = :userId', { userId: user.id });
+      }    const order = await queryBuilder.getOne();
 
     if (!order) {
       throw new NotFoundException('Pedido no encontrado');
@@ -984,35 +988,32 @@ export class OrdersService {
     try {
      
 
-      // Construir filtros base
-      const whereConditions: any = {
-        deliveryDate: query.deliveryDate,
-      };
+      // Construir queryBuilder para filtrar pedidos cancelados
+      const queryBuilder = this.orderRepository
+        .createQueryBuilder('order')
+        .leftJoinAndSelect('order.customer', 'customer')
+        .leftJoinAndSelect('order.address', 'address')
+        .leftJoinAndSelect('order.orderProducts', 'orderProducts')
+        .leftJoinAndSelect('orderProducts.product', 'product')
+        .leftJoinAndSelect('order.user', 'user')
+        .where('order.deliveryDate = :deliveryDate', { deliveryDate: query.deliveryDate })
+        // Filtrar pedidos cancelados
+        .andWhere('order.status != :cancelledStatus', { cancelledStatus: OrderStatus.CANCELLED });
 
       // Si no es admin, solo ver sus propios pedidos
       if (user.role !== UserRole.ADMIN) {
-        whereConditions.user = { id: user.id };
+        queryBuilder.andWhere('order.user.id = :userId', { userId: user.id });
       }
 
       // Filtro por estado si se especifica
       if (query.status) {
-        whereConditions.status = query.status;
+        queryBuilder.andWhere('order.status = :status', { status: query.status });
       }
 
       // Obtener órdenes con relaciones necesarias
-      const orders = await this.orderRepository.find({
-        where: whereConditions,
-        relations: [
-          'customer',
-          'address',
-          'orderProducts',
-          'orderProducts.product',
-          'user'
-        ],
-        order: {
-          createdAt: 'ASC'
-        }
-      });
+      const orders = await queryBuilder
+        .orderBy('order.createdAt', 'ASC')
+        .getMany();
 
 
       // Consolidar productos

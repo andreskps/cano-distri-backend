@@ -182,6 +182,9 @@ export class StatsService {
       conditions.push(`o."createdAt" >= '${startDate}'`);
       conditions.push(`o."createdAt" <= '${endDate} 23:59:59'`);
 
+      // Excluir pedidos cancelados de todas las estadísticas
+      conditions.push(`o.status != 'cancelled'`);
+
       // Si no es admin, solo ver sus propios pedidos
       if (user.role !== UserRole.ADMIN && query.sellerId) {
 
@@ -216,7 +219,7 @@ export class StatsService {
           COUNT(o.id) as total_orders,
           SUM(CASE WHEN o.status = 'delivered' THEN 1 ELSE 0 END) as delivered_orders,
           SUM(CASE WHEN o.status = 'pending' THEN 1 ELSE 0 END) as pending_orders,
-          SUM(CASE WHEN o.status = 'cancelled' THEN 1 ELSE 0 END) as cancelled_orders,
+          0 as cancelled_orders,
           COALESCE(SUM(CASE WHEN o.status = 'delivered' THEN o.total::numeric ELSE 0 END), 0) as total_sales,
           COALESCE(AVG(CASE WHEN o.status = 'delivered' THEN o.total::numeric ELSE NULL END), 0) as average_order_value
         FROM orders o
@@ -277,7 +280,7 @@ export class StatsService {
         totalOrders: parseInt(sales.total_orders) || 0,
         deliveredOrders: parseInt(sales.delivered_orders) || 0,
         pendingOrders: parseInt(sales.pending_orders) || 0,
-        cancelledOrders: parseInt(sales.cancelled_orders) || 0,
+        cancelledOrders: 0, // Siempre 0 ya que excluimos cancelados
         averageOrderValue: Math.round((parseFloat(sales.average_order_value) || 0) * 100) / 100,
         totalProductsSold: parseInt(costs.total_products_sold) || 0,
       };
