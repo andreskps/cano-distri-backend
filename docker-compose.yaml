@@ -1,4 +1,4 @@
-version: '3.8'
+
 
 services:
   # Base de datos PostgreSQL
@@ -68,6 +68,7 @@ services:
     restart: no
     depends_on:
       - db
+    command: sh /scripts/backup.sh
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -78,7 +79,6 @@ services:
       - ./scripts:/scripts:ro
     networks:
       - internal
-    command: sh /scripts/backup.sh
 
 volumes:
   db_data:
