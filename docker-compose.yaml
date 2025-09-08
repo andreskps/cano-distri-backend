@@ -61,7 +61,7 @@ services:
   backup:
     image: postgres:15-alpine
     container_name: cano-distri-backend-backup
-    restart: unless-stopped
+    restart: no
     depends_on:
       - db
     environment:
