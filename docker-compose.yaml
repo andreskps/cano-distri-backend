@@ -24,13 +24,6 @@ services:
       - dokploy-network
     expose:
       - "3001"
-    healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3001/api/v1/pedidos || exit 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
 networks:
   dokploy-network:
     external: true
