@@ -16,7 +16,7 @@ services:
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET}
       JWT_REFRESH_EXPIRATION_TIME: ${JWT_REFRESH_EXPIRATION_TIME}
       BCRYPT_SALT_ROUNDS: ${BCRYPT_SALT_ROUNDS}
-      PORT: 3000
+      PORT: 3001
       NODE_ENV: production
       TZ: America/Bogota
       TYPEORM_SYNC: ${TYPEORM_SYNC}
@@ -31,7 +31,7 @@ services:
       - traefik.http.routers.cano-api-http.entrypoints=web
       - traefik.http.routers.cano-api-http.middlewares=redirect-to-https
       - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
-      - traefik.http.services.cano-api.loadbalancer.server.port=3000
+      - traefik.http.services.cano-api.loadbalancer.server.port=3001
       - dokploy.routers=false
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1"]
