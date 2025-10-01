@@ -32,6 +32,7 @@ services:
       - traefik.http.routers.cano-api-http.middlewares=redirect-to-https
       - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
       - traefik.http.services.cano-api.loadbalancer.server.port=3000
+      - dokploy.routers=false
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1"]
       interval: 30s
