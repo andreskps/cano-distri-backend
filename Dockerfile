@@ -35,6 +35,6 @@ RUN chmod +x wait-for-db.sh
 
 USER app
 
-EXPOSE 3000
+EXPOSE 3001
 
 CMD ["sh", "wait-for-db.sh"]
