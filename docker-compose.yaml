@@ -24,6 +24,7 @@ services:
       - dokploy-network
     labels:
       - traefik.enable=true
+      - traefik.docker.network=dokploy-network
       - traefik.http.routers.cano-api.rule=Host(`api-cano-distri.andresvps.cloud`)
       - traefik.http.routers.cano-api.entrypoints=websecure
       - traefik.http.routers.cano-api.tls.certresolver=letsencrypt
