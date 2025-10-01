@@ -22,17 +22,8 @@ services:
       TYPEORM_SYNC: ${TYPEORM_SYNC}
     networks:
       - dokploy-network
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=dokploy-network
-      - traefik.http.routers.cano-api.rule=Host(`api-cano-distri.andresvps.cloud`)
-      - traefik.http.routers.cano-api.entrypoints=websecure
-      - traefik.http.routers.cano-api.tls.certresolver=letsencrypt
-      - traefik.http.services.cano-api.loadbalancer.server.port=3001
-      - traefik.http.routers.cano-api-http.rule=Host(`api-cano-distri.andresvps.cloud`)
-      - traefik.http.routers.cano-api-http.entrypoints=web
-      - traefik.http.routers.cano-api-http.middlewares=redirect-to-https
-      - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
+    expose:
+      - "3001"
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3001 || exit 1"]
       interval: 30s
