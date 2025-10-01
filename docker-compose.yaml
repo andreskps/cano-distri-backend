@@ -1,31 +1,7 @@
-
+version: "3.9"
 
 services:
-  # Base de datos PostgreSQL
-  db:
-    image: postgres:15-alpine
-    container_name: cano-distri-backend-db
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-      TZ: America/Bogota
-    volumes:
-      - db_data:/var/lib/postgresql/data
-      - ./backups:/backups
-    networks:
-      - internal
-    ports:
-      - "5432:5432" # para acceso externo si es necesario
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-
-  # Aplicación NestJS
+  # 🚀 API principal NestJS
   api:
     build: .
     container_name: cano-distri-backend-api
@@ -50,10 +26,23 @@ services:
       TZ: America/Bogota
       TYPEORM_SYNC: ${TYPEORM_SYNC}
     expose:
-      - "3000" # para que NPM lo vea internamente sin publicar el puerto
+      - "3000"
     networks:
+      - dokploy-network
       - internal
-      - nginx-proxy
+    labels:
+      - traefik.enable=true
+      # Router HTTPS
+      - traefik.http.routers.cano-api.rule=Host(`api-cano-distri.andresvps.cloud`)
+      - traefik.http.routers.cano-api.entrypoints=websecure
+      - traefik.http.routers.cano-api.tls.certresolver=letsencrypt
+      # Servicio interno
+      - traefik.http.services.cano-api.loadbalancer.server.port=3000
+      # Redirección HTTP → HTTPS
+      - traefik.http.routers.cano-api-http.rule=Host(`api-cano-distri.andresvps.cloud`)
+      - traefik.http.routers.cano-api-http.entrypoints=web
+      - traefik.http.routers.cano-api-http.middlewares=redirect-to-https
+      - traefik.http.middlewares.redirect-to-https.redirectscheme.scheme=https
     healthcheck:
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000 || exit 1"]
       interval: 30s
@@ -61,7 +50,28 @@ services:
       retries: 3
       start_period: 40s
 
-  # Servicio de backup automático
+  # 🧱 Base de datos PostgreSQL (mantiene tus datos)
+  db:
+    image: postgres:15-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+      TZ: America/Bogota
+    volumes:
+      - cano-distri-backend_db_data:/var/lib/postgresql/data
+      - ./backups:/backups
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  # 💾 Servicio de backup
   backup:
     image: postgres:15-alpine
     container_name: cano-distri-backend-backup
@@ -81,11 +91,12 @@ services:
       - internal
 
 volumes:
-  db_data:
-    driver: local
+  cano-distri-backend_db_data:
+    external: true
 
 networks:
+  dokploy-network:
+    external: true
   internal:
     driver: bridge
-  nginx-proxy:
     external: true
