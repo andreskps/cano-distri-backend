@@ -9,6 +9,9 @@ import { ProductsModule } from './products/products.module';
 import { OrdersModule } from './orders/orders.module';
 import { AuthModule } from './auth/auth.module';
 import { StatsModule } from './stats/stats.module';
+import { SuppliersModule } from './suppliers/suppliers.module';
+import { PurchasesModule } from './purchases/purchases.module';
+import { InventoryModule } from './inventory/inventory.module';
 
 @Module({
   imports: [
@@ -31,6 +34,9 @@ import { StatsModule } from './stats/stats.module';
     OrdersModule,
     AuthModule,
     StatsModule,
+    SuppliersModule,
+    PurchasesModule,
+    InventoryModule,
   ],
 
   controllers: [AppController],
