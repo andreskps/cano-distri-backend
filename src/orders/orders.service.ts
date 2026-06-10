@@ -427,16 +427,39 @@ export class OrdersService {
         this.validateOrderUpdate(order, user);
 
         // Validar campos a actualizar
-        await this.validateUpdateData(updateOrderDto, order.customer.id, manager);
+        const currentCustomerId = order.customer.id;
+        let effectiveCustomerId = currentCustomerId;
 
-        let shouldRecalculateTotal = false;
+        if (updateOrderDto.customerId && updateOrderDto.customerId !== currentCustomerId) {
+          const newCustomer = await manager.findOne(Customer, {
+            where: { id: updateOrderDto.customerId },
+            relations: ['seller'],
+          });
+
+          if (!newCustomer) {
+            throw new NotFoundException('Cliente no encontrado');
+          }
+
+          if (user.role === UserRole.SELLER && newCustomer.seller?.id !== user.id) {
+            throw new ForbiddenException('No tienes permiso para mover el pedido a este cliente');
+          }
+
+          if (!updateOrderDto.addressId) {
+            throw new BadRequestException('Debes seleccionar una direccion del nuevo cliente');
+          }
+
+          order.customer = newCustomer;
+          effectiveCustomerId = newCustomer.id;
+        }
+
+        await this.validateUpdateData(updateOrderDto, effectiveCustomerId, manager);
 
         // Si se cambia la dirección, obtenerla y validarla
         if (updateOrderDto.addressId) {
           const newAddress = await manager.findOne(CustomerAddress, {
             where: { 
               id: updateOrderDto.addressId, 
-              customer: { id: order.customer.id } 
+              customer: { id: effectiveCustomerId } 
             }
           });
 
@@ -446,17 +469,19 @@ export class OrdersService {
         }
 
         // Actualizar campos permitidos (excluyendo addressId que ya se manejó)
-        const { addressId, ...updateFields } = updateOrderDto;
+        const { addressId, customerId, products, ...updateFields } = updateOrderDto;
         Object.assign(order, updateFields);
+        order.orderProducts = undefined as any;
         
         // Guardar cambios en la orden
         const updatedOrder = await manager.save(Order, order);
 
         // Recalcular total si es necesario
-        if (shouldRecalculateTotal) {
+        if (products) {
+          await this.replaceOrderProducts(updatedOrder, products, manager);
           const newTotal = await this.recalculateOrderTotal(updatedOrder.id, manager);
           updatedOrder.total = newTotal;
-          await manager.save(Order, updatedOrder);
+          await manager.update(Order, updatedOrder.id, { total: newTotal });
         }
 
         // Crear historial de cambio si hay modificaciones significativas
@@ -570,11 +595,6 @@ export class OrdersService {
       }
     }
 
-    // Validar que las notas no estén vacías si se proporcionan
-    if (updateOrderDto.notes !== undefined && updateOrderDto.notes.trim() === '') {
-      throw new BadRequestException('Las notas no pueden estar vacías');
-    }
-
     // Validar dirección si se proporciona
     if (updateOrderDto.addressId && customerId && manager) {
       const address = await manager.findOne(CustomerAddress, {
@@ -588,13 +608,55 @@ export class OrdersService {
         throw new BadRequestException('La dirección especificada no pertenece al cliente o no existe');
       }
     }
+
+    if (updateOrderDto.products) {
+      if (updateOrderDto.products.length === 0) {
+        throw new BadRequestException('El pedido debe contener al menos un producto');
+      }
+
+      const productIds = updateOrderDto.products.map((p) => p.productId);
+      const uniqueProductIds = new Set(productIds);
+      if (productIds.length !== uniqueProductIds.size) {
+        throw new BadRequestException('No se pueden agregar productos duplicados al pedido');
+      }
+    }
+  }
+
+  /**
+   * Reemplaza todos los productos del pedido y recalcula sus valores derivados.
+   */
+  private async replaceOrderProducts(
+    order: Order,
+    products: UpdateOrderDto['products'],
+    manager: any,
+  ): Promise<void> {
+    if (!products || products.length === 0) {
+      throw new BadRequestException('El pedido debe contener al menos un producto');
+    }
+
+    const validatedProducts = await this.validateAndGetProducts(products, manager);
+
+    await manager
+      .createQueryBuilder()
+      .delete()
+      .from(OrderProduct)
+      .where('"orderId" = :orderId', { orderId: order.id })
+      .execute();
+
+    await this.createOrderProducts(order, validatedProducts, manager);
   }
 
   /**
    * Determina si hay cambios significativos que requieren historial
    */
   private hasSignificantChanges(updateOrderDto: UpdateOrderDto): boolean {
-    return !!(updateOrderDto.deliveryDate || updateOrderDto.notes || updateOrderDto.addressId);
+    return !!(
+      updateOrderDto.customerId ||
+      updateOrderDto.deliveryDate ||
+      updateOrderDto.notes !== undefined ||
+      updateOrderDto.addressId ||
+      updateOrderDto.products
+    );
   }
 
   /**
@@ -611,13 +673,21 @@ export class OrdersService {
     if (updateOrderDto.deliveryDate) {
       notes += ` - Nueva fecha de entrega: ${updateOrderDto.deliveryDate}`;
     }
+
+    if (updateOrderDto.customerId) {
+      notes += ` - Cliente actualizado`;
+    }
     
     if (updateOrderDto.addressId) {
       notes += ` - Dirección de entrega actualizada`;
     }
     
-    if (updateOrderDto.notes) {
+    if (updateOrderDto.notes !== undefined) {
       notes += ` - Notas: ${updateOrderDto.notes}`;
+    }
+
+    if (updateOrderDto.products) {
+      notes += ` - Productos actualizados (${updateOrderDto.products.length})`;
     }
 
     const statusHistory = manager.create(OrderStatusHistory, {
