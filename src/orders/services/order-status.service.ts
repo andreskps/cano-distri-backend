@@ -30,8 +30,8 @@ export class OrderStatusService {
       throw new NotFoundException('Pedido no encontrado');
     }
 
-    // Verificar permisos: solo el vendedor que creó el pedido o un admin pueden cambiar el estado
-    if (user.role !== UserRole.ADMIN && order.user?.id !== user.id) {
+    // Verificar permisos: solo el vendedor que creó el pedido, un admin, o un transportador pueden cambiar el estado
+    if (user.role !== UserRole.ADMIN && user.role !== UserRole.CARRIER && order.user?.id !== user.id) {
       throw new ForbiddenException('No tienes permisos para modificar este pedido');
     }
 
@@ -103,8 +103,8 @@ export class OrderStatusService {
       throw new NotFoundException('Pedido no encontrado');
     }
 
-    // Verificar permisos: solo el vendedor que creó el pedido o un admin pueden ver el historial
-    if (user.role !== UserRole.ADMIN && order.user?.id !== user.id) {
+    // Verificar permisos: solo el vendedor que creó el pedido, un admin, o un transportador pueden ver el historial
+    if (user.role !== UserRole.ADMIN && user.role !== UserRole.CARRIER && order.user?.id !== user.id) {
       throw new ForbiddenException('No tienes permisos para ver este pedido');
     }
 

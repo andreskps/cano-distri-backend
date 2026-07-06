@@ -11,6 +11,7 @@ import { Customer } from '../../customers/entities/customer.entity';
 export enum UserRole {
     ADMIN = 'admin',
     SELLER = 'seller',
+    CARRIER = 'carrier',
 }
 
 @Entity('users')
