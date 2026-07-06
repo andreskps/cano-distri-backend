@@ -1,4 +1,4 @@
-import { IsString, IsOptional, MinLength, MaxLength } from 'class-validator';
+import { IsString, IsOptional, MinLength, MaxLength, IsNumber } from 'class-validator';
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 
 export class CreateCustomerAddressDto {
@@ -46,4 +46,20 @@ export class CreateCustomerAddressDto {
   @IsString({ message: 'El país debe ser una cadena de texto' })
   @MaxLength(100, { message: 'El país no puede exceder 100 caracteres' })
   country?: string;
+
+  @ApiPropertyOptional({ 
+    example: 14.634915, 
+    description: 'Latitud de la ubicación' 
+  })
+  @IsOptional()
+  @IsNumber({}, { message: 'La latitud debe ser un número' })
+  latitude?: number;
+
+  @ApiPropertyOptional({ 
+    example: -90.506882, 
+    description: 'Longitud de la ubicación' 
+  })
+  @IsOptional()
+  @IsNumber({}, { message: 'La longitud debe ser un número' })
+  longitude?: number;
 }

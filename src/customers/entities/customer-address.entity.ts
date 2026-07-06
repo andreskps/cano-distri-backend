@@ -7,7 +7,7 @@ import {
   CreateDateColumn,
 } from 'typeorm';
 import { Customer } from './customer.entity';
-// import { Order } from '../../orders/entities/order.entity';
+import { Order } from '../../orders/entities/order.entity';
 
 @Entity('customer_addresses')
 export class CustomerAddress {
@@ -32,9 +32,15 @@ export class CustomerAddress {
   @Column({ type: 'varchar', length: 100, nullable: true })
   country: string | null;
 
+  @Column({ type: 'double precision', nullable: true })
+  latitude: number | null;
+
+  @Column({ type: 'double precision', nullable: true })
+  longitude: number | null;
+
   // An address can be linked to many orders
-//   @OneToMany(() => Order, (order) => order.address)
-//   orders: Order[];
+  @OneToMany(() => Order, (order) => order.address)
+  orders: Order[];
 
   @CreateDateColumn({ type: 'timestamp with time zone' })
   createdAt: Date;
