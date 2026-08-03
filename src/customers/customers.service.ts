@@ -103,11 +103,6 @@ export class CustomersService {
       // Siempre filtrar solo clientes activos
       .where('customer.isActive = :isActive', { isActive: true });
 
-    // Si es vendedor, solo ve sus clientes (añadir condición)
-    if (user.role === UserRole.SELLER) {
-      queryBuilder.andWhere('customer.seller.id = :sellerId', { sellerId: user.id });
-    }
-
     // Agregar búsqueda si está presente
     if (search && search.trim()) {
       const searchTerm = `%${search.trim()}%`;
@@ -149,11 +144,6 @@ export class CustomersService {
       .leftJoinAndSelect('customer.addresses', 'addresses')
       .where('customer.id = :id', { id })
       .andWhere('customer.isActive = :isActive', { isActive: true });
-
-    // Si es vendedor, verificar que el cliente le pertenece
-    if (user.role === UserRole.SELLER) {
-      queryBuilder.andWhere('customer.seller.id = :sellerId', { sellerId: user.id });
-    }
 
     const customer = await queryBuilder.getOne();
 

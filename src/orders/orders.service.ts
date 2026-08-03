@@ -57,11 +57,6 @@ export class OrdersService {
           throw new NotFoundException('Cliente no encontrado');
         }
 
-        // Verificar permisos de creación
-        if (user.role === UserRole.SELLER && customer.seller?.id !== user.id) {
-          throw new ForbiddenException('No tienes permiso para crear pedidos para este cliente');
-        }
-
         // Obtener la dirección de entrega
         const address = await manager.findOne(CustomerAddress, {
           where: { 
@@ -438,10 +433,6 @@ export class OrdersService {
 
           if (!newCustomer) {
             throw new NotFoundException('Cliente no encontrado');
-          }
-
-          if (user.role === UserRole.SELLER && newCustomer.seller?.id !== user.id) {
-            throw new ForbiddenException('No tienes permiso para mover el pedido a este cliente');
           }
 
           if (!updateOrderDto.addressId) {
