@@ -320,12 +320,13 @@ export class OrdersService {
     query: GetOrdersQueryDto, 
     user: User
   ): Promise<PaginatedResponseDto<Order>> {
-    const { page = 1, limit = 10, fecha, estado, clienteId, codigo } = query;
+    const { page = 1, limit = 10, fecha, fechaInicio, fechaFin, estado, clienteId, codigo } = query;
     const skip = (page - 1) * limit;
 
     const queryBuilder = this.orderRepository
       .createQueryBuilder('order')
       .leftJoinAndSelect('order.customer', 'customer')
+      .leftJoinAndSelect('customer.seller', 'customerSeller')
       .leftJoinAndSelect('order.address', 'address')
       .leftJoinAndSelect('order.user', 'seller')
       .leftJoinAndSelect('order.orderProducts', 'orderProducts')
@@ -335,12 +336,27 @@ export class OrdersService {
 
     // Filtro por rol de usuario
     if (user.role === UserRole.SELLER) {
-      queryBuilder.andWhere('order.user.id = :userId', { userId: user.id });
+      if (clienteId) {
+        queryBuilder.andWhere(
+          '(order.user.id = :userId OR customerSeller.id = :userId)',
+          { userId: user.id }
+        );
+      } else {
+        queryBuilder.andWhere('order.user.id = :userId', { userId: user.id });
+      }
     }
 
     // Filtros opcionales
     if (fecha) {
       queryBuilder.andWhere('order.deliveryDate = :fecha', { fecha });
+    }
+
+    if (fechaInicio) {
+      queryBuilder.andWhere('order.deliveryDate >= :fechaInicio', { fechaInicio });
+    }
+
+    if (fechaFin) {
+      queryBuilder.andWhere('order.deliveryDate <= :fechaFin', { fechaFin });
     }
 
     if (estado) {

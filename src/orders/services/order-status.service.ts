@@ -23,15 +23,17 @@ export class OrderStatusService {
     // Buscar el pedido
     const order = await this.orderRepository.findOne({
       where: { id: orderId },
-      relations: ['user'],
+      relations: ['user', 'customer', 'customer.seller'],
     });
 
     if (!order) {
       throw new NotFoundException('Pedido no encontrado');
     }
 
-    // Verificar permisos: solo el vendedor que creó el pedido, un admin, o un transportador pueden cambiar el estado
-    if (user.role !== UserRole.ADMIN && user.role !== UserRole.CARRIER && order.user?.id !== user.id) {
+    // Verificar permisos: el vendedor que creó el pedido, el vendedor del cliente, un admin, o un transportador pueden cambiar el estado
+    const isCreator = order.user?.id === user.id;
+    const isCustomerSeller = order.customer?.seller?.id === user.id;
+    if (user.role !== UserRole.ADMIN && user.role !== UserRole.CARRIER && !isCreator && !isCustomerSeller) {
       throw new ForbiddenException('No tienes permisos para modificar este pedido');
     }
 
@@ -63,15 +65,17 @@ export class OrderStatusService {
     // Buscar el pedido
     const order = await this.orderRepository.findOne({
       where: { id: orderId },
-      relations: ['user'],
+      relations: ['user', 'customer', 'customer.seller'],
     });
 
     if (!order) {
       throw new NotFoundException('Pedido no encontrado');
     }
 
-    // Verificar permisos: solo el vendedor que creó el pedido o un admin pueden cambiar el estado de pago
-    if (user.role !== UserRole.ADMIN && order.user?.id !== user.id) {
+    // Verificar permisos: el vendedor que creó el pedido, el vendedor del cliente, o un admin pueden cambiar el estado de pago
+    const isCreator = order.user?.id === user.id;
+    const isCustomerSeller = order.customer?.seller?.id === user.id;
+    if (user.role !== UserRole.ADMIN && !isCreator && !isCustomerSeller) {
       throw new ForbiddenException('No tienes permisos para modificar este pedido');
     }
 
@@ -96,15 +100,17 @@ export class OrderStatusService {
     // Buscar el pedido
     const order = await this.orderRepository.findOne({
       where: { id: orderId },
-      relations: ['user'],
+      relations: ['user', 'customer', 'customer.seller'],
     });
 
     if (!order) {
       throw new NotFoundException('Pedido no encontrado');
     }
 
-    // Verificar permisos: solo el vendedor que creó el pedido, un admin, o un transportador pueden ver el historial
-    if (user.role !== UserRole.ADMIN && user.role !== UserRole.CARRIER && order.user?.id !== user.id) {
+    // Verificar permisos: el vendedor que creó el pedido, el vendedor del cliente, un admin, o un transportador pueden ver el historial
+    const isCreator = order.user?.id === user.id;
+    const isCustomerSeller = order.customer?.seller?.id === user.id;
+    if (user.role !== UserRole.ADMIN && user.role !== UserRole.CARRIER && !isCreator && !isCustomerSeller) {
       throw new ForbiddenException('No tienes permisos para ver este pedido');
     }
 
