@@ -1,4 +1,4 @@
-import { Injectable, UnauthorizedException, ConflictException } from '@nestjs/common';
+import { Injectable, UnauthorizedException, ConflictException, NotFoundException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { UsersService } from '../users/users.service';
@@ -67,24 +67,29 @@ export class AuthService {
   }
 
   async refreshToken(refreshTokenDto: RefreshTokenDto): Promise<RefreshResponseDto> {
+    let payload: JwtPayload;
     try {
       // Verificar el refresh token
-      const payload = this.jwtService.verify(refreshTokenDto.refreshToken, {
+      payload = this.jwtService.verify(refreshTokenDto.refreshToken, {
         secret: this.configService.get<string>('JWT_REFRESH_SECRET'),
       });
 
-      // Buscar el usuario y verificar que esté activo
-      const user = await this.usersService.findOne(payload.sub);
-      
-      if (!user.isActive) {
-        throw new UnauthorizedException('Usuario inactivo');
-      }
-
-      // Generar nuevos tokens
-      return await this.generateTokens(user);
     } catch (error) {
       throw new UnauthorizedException('Refresh token inválido');
     }
+
+    let user: User;
+    try {
+      user = await this.usersService.findOne(payload.sub);
+    } catch (error) {
+      if (error instanceof NotFoundException) {
+        throw new UnauthorizedException('Usuario no encontrado');
+      }
+      // Database/server outages must remain server errors, not invalid sessions.
+      throw error;
+    }
+    if (!user?.isActive) throw new UnauthorizedException('Usuario inactivo');
+    return this.generateTokens(user);
   }
 
   private async generateTokens(user: User): Promise<{ access_token: string; refresh_token: string }> {

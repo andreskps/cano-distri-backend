@@ -1,5 +1,6 @@
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { NotFoundException, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import type { UsersService } from '../users/users.service';
 import type { User } from '../users/entities/user.entity';
@@ -50,4 +51,39 @@ describe('AuthService session duration', () => {
       }
     },
   );
+
+  it('preserves database errors instead of declaring the session invalid', async () => {
+    const failure = new Error('Database temporarily unavailable');
+    const jwt = new JwtService();
+    const config = new ConfigService({ JWT_REFRESH_SECRET: 'test-refresh-secret' });
+    const users = { findOne: jest.fn().mockRejectedValue(failure) } as unknown as UsersService;
+    const service = new AuthService(users, jwt, config);
+    const refreshToken = jwt.sign({ sub: user.id }, { secret: 'test-refresh-secret', expiresIn: '7d' });
+    await expect(service.refreshToken({ refreshToken })).rejects.toBe(failure);
+  });
+
+  it('still rejects expired refresh tokens, deleted users and inactive users', async () => {
+    const jwt = new JwtService();
+    const config = new ConfigService({ JWT_REFRESH_SECRET: 'test-refresh-secret' });
+    const findOne = jest.fn();
+    const service = new AuthService({ findOne } as unknown as UsersService, jwt, config);
+    const expired = jwt.sign({ sub: user.id }, { secret: 'test-refresh-secret', expiresIn: -1 });
+    await expect(service.refreshToken({ refreshToken: expired })).rejects.toBeInstanceOf(UnauthorizedException);
+    expect(findOne).not.toHaveBeenCalled();
+    const refreshToken = jwt.sign({ sub: user.id }, { secret: 'test-refresh-secret', expiresIn: '7d' });
+    findOne.mockRejectedValueOnce(new NotFoundException());
+    await expect(service.refreshToken({ refreshToken })).rejects.toBeInstanceOf(UnauthorizedException);
+    findOne.mockResolvedValueOnce({ ...user, isActive: false });
+    await expect(service.refreshToken({ refreshToken })).rejects.toBeInstanceOf(UnauthorizedException);
+  });
+
+  it('preserves token issuance errors so renewal can be retried', async () => {
+    const failure = new Error('Signing temporarily unavailable');
+    const jwt = new JwtService();
+    const config = new ConfigService({ JWT_REFRESH_SECRET: 'test-refresh-secret' });
+    const service = new AuthService({ findOne: jest.fn().mockResolvedValue(user) } as unknown as UsersService, jwt, config);
+    const refreshToken = jwt.sign({ sub: user.id }, { secret: 'test-refresh-secret', expiresIn: '7d' });
+    jest.spyOn(jwt, 'signAsync').mockRejectedValue(failure);
+    await expect(service.refreshToken({ refreshToken })).rejects.toBe(failure);
+  });
 });
