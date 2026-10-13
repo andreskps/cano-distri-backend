@@ -27,7 +27,7 @@ DATABASE_NAME=cano_distri_db
 
 # JWT Configuration
 JWT_SECRET=your-super-secret-jwt-key-here-please-change-this-in-production
-JWT_EXPIRATION_TIME=8h
+JWT_EXPIRATION_TIME=7d
 JWT_REFRESH_SECRET=your-super-secret-refresh-key-here-please-change-this-in-production
 JWT_REFRESH_EXPIRATION_TIME=7d
 
@@ -39,6 +39,12 @@ PORT=3000
 NODE_ENV=development
 FRONTEND_URL=http://localhost:3000
 ```
+
+Los tokens de acceso y de renovación duran siete días. El frontend mantiene su
+cookie de sesión durante el mismo período. En el servidor de producción, configura
+`JWT_EXPIRATION_TIME=7d` y `JWT_REFRESH_EXPIRATION_TIME=7d`, y reinicia la API.
+Los tokens ya emitidos conservan su vencimiento original; la nueva duración se
+aplica al iniciar sesión o renovar el token.
 
 ## Endpoints de Autenticación
 

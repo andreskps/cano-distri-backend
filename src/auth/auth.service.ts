@@ -98,7 +98,7 @@ export class AuthService {
       // Access token
       this.jwtService.signAsync(payload, {
         secret: this.configService.get<string>('JWT_SECRET'),
-        expiresIn: this.configService.get<string>('JWT_EXPIRATION_TIME') || '8h',
+        expiresIn: this.configService.get<string>('JWT_EXPIRATION_TIME') || '7d',
       }),
       // Refresh token
       this.jwtService.signAsync(payload, {
