@@ -1,3 +1,4 @@
+import { isPastDeliveryDate } from '../common/business-date';
 import { 
   Injectable, 
   NotFoundException, 
@@ -146,11 +147,7 @@ export class OrdersService {
     }
 
     // Validar fecha de entrega (no puede ser en el pasado)
-    const deliveryDate = new Date(createOrderDto.deliveryDate);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    
-    if (deliveryDate < today) {
+    if (isPastDeliveryDate(createOrderDto.deliveryDate)) {
       throw new BadRequestException('La fecha de entrega no puede ser en el pasado');
     }
 
@@ -593,11 +590,7 @@ export class OrdersService {
   private async validateUpdateData(updateOrderDto: UpdateOrderDto, customerId?: string, manager?: any): Promise<void> {
     // Validar fecha de entrega si se proporciona
     if (updateOrderDto.deliveryDate) {
-      const deliveryDate = new Date(updateOrderDto.deliveryDate);
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
-      
-      if (deliveryDate < today) {
+      if (isPastDeliveryDate(updateOrderDto.deliveryDate)) {
         throw new BadRequestException('La fecha de entrega no puede ser en el pasado');
       }
     }
