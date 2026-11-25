@@ -24,6 +24,7 @@ async function bootstrap() {
       }
     },
     credentials: true,
+    exposedHeaders: ['Content-Disposition'],
   });
 
   // Aplicar pipe de validación global

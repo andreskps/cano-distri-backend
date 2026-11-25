@@ -9,6 +9,9 @@ import { CustomerQueryParams, PaginationDto } from './dto/pagination.dto';
 import { Customer } from './entities/customer.entity';
 import { CustomerAddress } from './entities/customer-address.entity';
 import { User, UserRole } from '../users/entities/user.entity';
+import { OrderStatus } from '../orders/entities/order-status.enum';
+import { getBogotaDate } from '../common/business-date';
+import { buildRuteroWorkbook, RuteroCustomer, RuteroOrder } from './rutero/rutero.builder';
 
 export interface PaginatedResponse<T> {
   data: T[];
@@ -213,6 +216,47 @@ export class CustomersService {
         hasNextPage: page < totalPages,
         hasPrevPage: page > 1,
       },
+    };
+  }
+
+  /**
+   * Rutero de clientes activos en Excel. Mismo alcance que findAll:
+   * todos los clientes activos, para admin y seller.
+   */
+  async getRutero(_user: User): Promise<{ buffer: Buffer; filename: string }> {
+    const customers: RuteroCustomer[] = await this.customerRepository.query(
+      `WITH dir_pedido AS (
+         SELECT DISTINCT ON (o."customerId") o."customerId", o."addressId"
+         FROM orders o
+         WHERE o."addressId" IS NOT NULL AND o.status <> $1
+         ORDER BY o."customerId", o."createdAt" DESC
+       ),
+       dir_ultima AS (
+         SELECT DISTINCT ON (ca."customerId") ca."customerId", ca.id AS "addressId"
+         FROM customer_addresses ca
+         WHERE ca."customerId" IS NOT NULL
+         ORDER BY ca."customerId", ca."createdAt" DESC
+       )
+       SELECT c.id, c.name, c."taxId", c.phone, c.email, c."contactPerson", a.address, a.city
+       FROM customers c
+       LEFT JOIN dir_pedido dp ON dp."customerId" = c.id
+       LEFT JOIN dir_ultima du ON du."customerId" = c.id
+       LEFT JOIN customer_addresses a ON a.id = COALESCE(dp."addressId", du."addressId")
+       WHERE c."isActive" = true`,
+      [OrderStatus.CANCELLED],
+    );
+
+    const orders: RuteroOrder[] = await this.customerRepository.query(
+      `SELECT o."customerId", o."createdAt", o.status
+       FROM orders o
+       JOIN customers c ON c.id = o."customerId"
+       WHERE c."isActive" = true AND o.status <> $1`,
+      [OrderStatus.CANCELLED],
+    );
+
+    return {
+      buffer: buildRuteroWorkbook(customers, orders),
+      filename: `Rutero_Clientes_${getBogotaDate()}.xlsx`,
     };
   }
 

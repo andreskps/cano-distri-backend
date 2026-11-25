@@ -10,8 +10,11 @@ import {
   UseGuards,
   HttpCode,
   HttpStatus,
-  ParseUUIDPipe
+  ParseUUIDPipe,
+  Res,
+  StreamableFile,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { CustomersService, PaginatedResponse } from './customers.service';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
@@ -25,7 +28,7 @@ import { GetUser } from '../auth/decorators/get-user.decorator';
 import { User, UserRole } from '../users/entities/user.entity';
 import { Customer } from './entities/customer.entity';
 import { CustomerAddress } from './entities/customer-address.entity';
-import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery, ApiParam } from '@nestjs/swagger';
+import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiProduces } from '@nestjs/swagger';
 import { CustomerResponseDto } from './dto/customer-response.dto';
 import { PaginatedCustomerResponseDto } from './dto/paginated-customer-response.dto';
 
@@ -60,6 +63,32 @@ export class CustomersController {
     @GetUser() user: User,
   ): Promise<PaginatedResponse<Customer>> {
     return this.customersService.findAll(queryParams, user);
+  }
+
+  // Debe declararse antes de GET /customers/:id para que ':id' no capture 'rutero'.
+  @Get('rutero')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SELLER)
+  @ApiOperation({
+    summary: 'Descargar rutero de clientes activos en Excel',
+    description:
+      'Hojas: Todos, Lunes..Domingo y Sin pedidos. El día es el día de la semana (hora Bogotá) con más pedidos no cancelados; ' +
+      'en empate, el del pedido más reciente. El orden de visita (#) sigue la hora habitual de los pedidos del cliente en ese día.',
+  })
+  @ApiProduces('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+  @ApiResponse({ status: 200, description: 'Archivo .xlsx del rutero' })
+  @ApiResponse({ status: 401, description: 'No autenticado' })
+  @ApiResponse({ status: 403, description: 'Rol no permitido' })
+  async downloadRutero(
+    @GetUser() user: User,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<StreamableFile> {
+    const { buffer, filename } = await this.customersService.getRutero(user);
+    res.set({
+      'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+    });
+    return new StreamableFile(buffer);
   }
 
   @Get(':id')
