@@ -1,6 +1,6 @@
-import { Injectable, NotFoundException, ForbiddenException, BadRequestException, InternalServerErrorException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, InternalServerErrorException, ConflictException } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, ILike } from 'typeorm';
+import { Repository, ILike, EntityManager } from 'typeorm';
 import { CreateCustomerDto } from './dto/create-customer.dto';
 import { UpdateCustomerDto } from './dto/update-customer.dto';
 import { CreateCustomerAddressDto } from './dto/create-customer-address.dto';
@@ -11,7 +11,17 @@ import { CustomerAddress } from './entities/customer-address.entity';
 import { User, UserRole } from '../users/entities/user.entity';
 import { OrderStatus } from '../orders/entities/order-status.enum';
 import { getBogotaDate } from '../common/business-date';
-import { buildRuteroWorkbook, RuteroCustomer, RuteroOrder } from './rutero/rutero.builder';
+import {
+  buildRuteroWorkbook,
+  resolveRutero,
+  RUTERO_GROUPS,
+  RuteroCustomer,
+  RuteroOrder,
+  SavedRoute,
+} from './rutero/rutero.builder';
+import { CustomerRoute } from './entities/customer-route.entity';
+import { SaveRuteroPlanDto } from './dto/save-rutero-plan.dto';
+import { RuteroPlanResponse } from './dto/rutero-plan-response.dto';
 
 export interface PaginatedResponse<T> {
   data: T[];
@@ -32,6 +42,8 @@ export class CustomersService {
     private readonly customerRepository: Repository<Customer>,
     @InjectRepository(CustomerAddress)
     private readonly customerAddressRepository: Repository<CustomerAddress>,
+    @InjectRepository(CustomerRoute)
+    private readonly customerRouteRepository: Repository<CustomerRoute>,
   ) {}
 
   async create(createCustomerDto: CreateCustomerDto, seller: User): Promise<Customer> {
@@ -219,12 +231,11 @@ export class CustomersService {
     };
   }
 
-  /**
-   * Rutero de clientes activos en Excel. Mismo alcance que findAll:
-   * todos los clientes activos, para admin y seller.
-   */
-  async getRutero(_user: User): Promise<{ buffer: Buffer; filename: string }> {
-    const customers: RuteroCustomer[] = await this.customerRepository.query(
+  // ==================== RUTERO ====================
+
+  /** Clientes activos con su dirección de ruta, pedidos válidos y rutas guardadas. */
+  private async loadRuteroSource(manager: EntityManager = this.customerRepository.manager) {
+    const customers: RuteroCustomer[] = await manager.query(
       `WITH dir_pedido AS (
          SELECT DISTINCT ON (o."customerId") o."customerId", o."addressId"
          FROM orders o
@@ -246,7 +257,7 @@ export class CustomersService {
       [OrderStatus.CANCELLED],
     );
 
-    const orders: RuteroOrder[] = await this.customerRepository.query(
+    const orders: RuteroOrder[] = await manager.query(
       `SELECT o."customerId", o."createdAt", o.status
        FROM orders o
        JOIN customers c ON c.id = o."customerId"
@@ -254,8 +265,130 @@ export class CustomersService {
       [OrderStatus.CANCELLED],
     );
 
+    const saved: SavedRoute[] = await manager.query(
+      `SELECT r."customerId", r."dayOfWeek", r."visitOrder"
+       FROM customer_routes r
+       JOIN customers c ON c.id = r."customerId"
+       WHERE c."isActive" = true`,
+    );
+
+    return { customers, orders, saved };
+  }
+
+  /** Versión del rutero guardado (marca de tiempo exacta de PostgreSQL) y quién lo guardó. */
+  private async getRuteroVersion(manager: EntityManager = this.customerRepository.manager) {
+    const [row] = await manager.query(
+      `SELECT r."updatedAt"::text AS version, r."updatedAt", u.name AS "updatedBy"
+       FROM customer_routes r
+       LEFT JOIN users u ON u.id = r."updatedById"
+       ORDER BY r."updatedAt" DESC
+       LIMIT 1`,
+    );
     return {
-      buffer: buildRuteroWorkbook(customers, orders),
+      version: (row?.version as string | undefined) ?? null,
+      updatedAt: row ? new Date(row.updatedAt).toISOString() : null,
+      updatedBy: (row?.updatedBy as string | undefined) ?? null,
+    };
+  }
+
+  /**
+   * Rutero para el editor: 7 días + sin día, en orden de visita.
+   * Mismo alcance que findAll: todos los clientes activos, para admin y seller.
+   */
+  async getRuteroPlan(): Promise<RuteroPlanResponse> {
+    const { customers, orders, saved } = await this.loadRuteroSource();
+    const groups = resolveRutero(customers, orders, saved);
+    const meta = await this.getRuteroVersion();
+
+    return {
+      ...meta,
+      days: RUTERO_GROUPS.map((label, index) => ({
+        dayOfWeek: index < 7 ? index + 1 : null,
+        label,
+        customers: (groups.get(label) ?? []).map((row) => ({
+          id: row.id,
+          name: row.name,
+          phone: row.phone,
+          contactPerson: row.contactPerson,
+          address: row.address,
+          city: row.city,
+          suggestedDay: row.suggestedDay,
+          isSuggested: row.isSuggested,
+        })),
+      })),
+    };
+  }
+
+  /**
+   * Guarda el rutero completo (reemplaza el anterior). Rechaza con 409 si otra persona
+   * lo guardó después de que se cargó (version distinta).
+   */
+  async saveRuteroPlan(dto: SaveRuteroPlanDto, user: User): Promise<RuteroPlanResponse> {
+    const ids = dto.days.flatMap((day) => day.customerIds);
+    if (new Set(ids).size !== ids.length) {
+      throw new BadRequestException('Un cliente aparece más de una vez en el rutero');
+    }
+    const dayKeys = dto.days.map((day) => day.dayOfWeek ?? 0);
+    if (new Set(dayKeys).size !== dayKeys.length) {
+      throw new BadRequestException('Un día aparece más de una vez en el rutero');
+    }
+
+    await this.customerRepository.manager.transaction(async (manager) => {
+      // Serializa guardados concurrentes del rutero global.
+      await manager.query('LOCK TABLE customer_routes IN EXCLUSIVE MODE');
+
+      const { version } = await this.getRuteroVersion(manager);
+      if ((dto.version ?? null) !== version) {
+        throw new ConflictException(
+          'Otra persona guardó el rutero mientras lo editabas. Recarga para ver sus cambios.',
+        );
+      }
+
+      if (ids.length) {
+        const active: { id: string }[] = await manager.query(
+          'SELECT id FROM customers WHERE id = ANY($1::uuid[]) AND "isActive" = true',
+          [ids],
+        );
+        if (active.length !== ids.length) {
+          throw new BadRequestException(
+            'Algunos clientes del rutero ya no existen o están inactivos. Recarga el rutero.',
+          );
+        }
+      }
+
+      await manager.query('DELETE FROM customer_routes');
+
+      const rows = dto.days.flatMap((day) =>
+        day.customerIds.map((customerId, index) => ({
+          customerId,
+          dayOfWeek: day.dayOfWeek ?? null,
+          visitOrder: index + 1,
+        })),
+      );
+      if (rows.length) {
+        await manager.query(
+          `INSERT INTO customer_routes ("customerId", "dayOfWeek", "visitOrder", "updatedById", "updatedAt")
+           SELECT r."customerId", r."dayOfWeek", r."visitOrder", $4::uuid, now()
+           FROM unnest($1::uuid[], $2::smallint[], $3::int[]) AS r("customerId", "dayOfWeek", "visitOrder")`,
+          [rows.map((r) => r.customerId), rows.map((r) => r.dayOfWeek), rows.map((r) => r.visitOrder), user.id],
+        );
+      }
+    });
+
+    return this.getRuteroPlan();
+  }
+
+  /** Borra el rutero guardado: todos los clientes vuelven a la sugerencia por pedidos. */
+  async resetRuteroPlan(): Promise<RuteroPlanResponse> {
+    await this.customerRouteRepository.clear();
+    return this.getRuteroPlan();
+  }
+
+  /** Rutero en Excel, con el mismo día y orden que se ve en el editor. */
+  async getRutero(): Promise<{ buffer: Buffer; filename: string }> {
+    const { customers, orders, saved } = await this.loadRuteroSource();
+    return {
+      buffer: buildRuteroWorkbook(resolveRutero(customers, orders, saved)),
       filename: `Rutero_Clientes_${getBogotaDate()}.xlsx`,
     };
   }

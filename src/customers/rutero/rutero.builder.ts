@@ -19,6 +19,13 @@ export interface RuteroOrder {
   status?: string;
 }
 
+/** Día y orden guardados manualmente desde el editor. */
+export interface SavedRoute {
+  customerId: string;
+  dayOfWeek: number | null;
+  visitOrder: number;
+}
+
 export interface RuteroDay {
   /** ISO weekday 1 (lunes) ... 7 (domingo); null cuando no hay pedidos válidos. */
   dow: number | null;
@@ -27,14 +34,18 @@ export interface RuteroDay {
 }
 
 export const DAY_NAMES = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
-export const NO_ORDERS_SHEET = 'Sin pedidos';
+export const NO_DAY_SHEET = 'Sin día';
 export const ALL_SHEET = 'Todos';
+/** Hojas/columnas del rutero en orden: Lunes..Domingo y Sin día. */
+export const RUTERO_GROUPS = [...DAY_NAMES, NO_DAY_SHEET];
 
 const HEADERS = ['#', 'Cliente', 'Teléfono', 'Persona de contacto', 'Dirección', 'Ciudad', 'NIT', 'Correo', 'Observaciones'];
 const WIDTHS = [5, 36, 15, 26, 42, 16, 15, 30, 40];
 
+export const groupNameForDay = (dow: number | null) => (dow ? DAY_NAMES[dow - 1] : NO_DAY_SHEET);
+
 /**
- * Día de visita: el día de la semana (hora Bogotá) con más pedidos no cancelados;
+ * Día sugerido: el día de la semana (hora Bogotá) con más pedidos no cancelados;
  * en empate gana el día del pedido más reciente.
  */
 export function assignRuteroDay(orders: Omit<RuteroOrder, 'customerId'>[]): RuteroDay {
@@ -82,8 +93,8 @@ export function toTitleCase(value: string | null): string {
     .replace(/(^|[\s\-.(/])(\p{L})/gu, (_, sep: string, letter: string) => sep + letter.toLocaleUpperCase('es-CO'));
 }
 
-interface RuteroRow {
-  day: RuteroDay;
+export interface RuteroRow {
+  id: string;
   name: string;
   phone: string;
   contactPerson: string;
@@ -91,31 +102,52 @@ interface RuteroRow {
   city: string;
   taxId: string;
   email: string;
+  /** Día calculado desde los pedidos (aunque se haya guardado otro). */
+  suggestedDay: number | null;
+  /** true si el cliente aún no tiene día/orden guardado y se usa la sugerencia. */
+  isSuggested: boolean;
+  savedOrder: number | null;
+  visitMinutes: number | null;
 }
 
 const compareText = (a: string, b: string) => a.localeCompare(b, 'es', { sensitivity: 'base' });
 const byPlace = (a: RuteroRow, b: RuteroRow) =>
   compareText(a.city, b.city) || compareText(a.address, b.address) || compareText(a.name, b.name);
-const byVisit = (a: RuteroRow, b: RuteroRow) => {
-  const ta = a.day.visitMinutes ?? Number.POSITIVE_INFINITY;
-  const tb = b.day.visitMinutes ?? Number.POSITIVE_INFINITY;
+const byVisitTime = (a: RuteroRow, b: RuteroRow) => {
+  const ta = a.visitMinutes ?? Number.POSITIVE_INFINITY;
+  const tb = b.visitMinutes ?? Number.POSITIVE_INFINITY;
   return ta - tb || byPlace(a, b);
 };
+/** Primero lo guardado (por su orden), luego las sugerencias. */
+const byRoute = (suggestedSort: (a: RuteroRow, b: RuteroRow) => number) => (a: RuteroRow, b: RuteroRow) => {
+  if (!a.isSuggested && !b.isSuggested) return a.savedOrder! - b.savedOrder! || byPlace(a, b);
+  if (a.isSuggested !== b.isSuggested) return a.isSuggested ? 1 : -1;
+  return suggestedSort(a, b);
+};
 
-/** Agrupa clientes por hoja (7 días + Sin pedidos) ya ordenados en orden de visita. */
-export function groupRutero(customers: RuteroCustomer[], orders: RuteroOrder[]): Map<string, RuteroRow[]> {
+/**
+ * Agrupa clientes por día (7 días + Sin día) en orden de visita.
+ * Un cliente con ruta guardada usa ese día/orden; si no, la sugerencia por pedidos.
+ */
+export function resolveRutero(
+  customers: RuteroCustomer[],
+  orders: RuteroOrder[],
+  saved: SavedRoute[] = [],
+): Map<string, RuteroRow[]> {
   const ordersByCustomer = new Map<string, RuteroOrder[]>();
   for (const order of orders) {
     const list = ordersByCustomer.get(order.customerId) ?? [];
     list.push(order);
     ordersByCustomer.set(order.customerId, list);
   }
+  const savedByCustomer = new Map(saved.map((route) => [route.customerId, route]));
 
-  const groups = new Map<string, RuteroRow[]>([...DAY_NAMES, NO_ORDERS_SHEET].map((name) => [name, []]));
+  const groups = new Map<string, RuteroRow[]>(RUTERO_GROUPS.map((name) => [name, []]));
   for (const customer of customers) {
-    const day = assignRuteroDay(ordersByCustomer.get(customer.id) ?? []);
+    const suggestion = assignRuteroDay(ordersByCustomer.get(customer.id) ?? []);
+    const route = savedByCustomer.get(customer.id);
     const row: RuteroRow = {
-      day,
+      id: customer.id,
       name: (customer.name ?? '').trim(),
       phone: (customer.phone ?? '').trim(),
       contactPerson: (customer.contactPerson ?? '').trim(),
@@ -123,11 +155,16 @@ export function groupRutero(customers: RuteroCustomer[], orders: RuteroOrder[]):
       city: toTitleCase(customer.city),
       taxId: cleanTaxId(customer.taxId),
       email: (customer.email ?? '').trim(),
+      suggestedDay: suggestion.dow,
+      isSuggested: !route,
+      savedOrder: route ? route.visitOrder : null,
+      visitMinutes: suggestion.visitMinutes,
     };
-    groups.get(day.dow ? DAY_NAMES[day.dow - 1] : NO_ORDERS_SHEET)!.push(row);
+    const day = route ? route.dayOfWeek : suggestion.dow;
+    groups.get(groupNameForDay(day))!.push(row);
   }
 
-  for (const [name, rows] of groups) rows.sort(name === NO_ORDERS_SHEET ? byPlace : byVisit);
+  for (const [name, rows] of groups) rows.sort(byRoute(name === NO_DAY_SHEET ? byPlace : byVisitTime));
   return groups;
 }
 
@@ -154,16 +191,15 @@ function buildSheet(header: string[], widths: number[], rows: (string | number)[
   return sheet;
 }
 
-/** Genera el .xlsx del rutero: Todos, Lunes..Domingo y Sin pedidos. */
-export function buildRuteroWorkbook(customers: RuteroCustomer[], orders: RuteroOrder[]): Buffer {
-  const groups = groupRutero(customers, orders);
+/** Genera el .xlsx del rutero: Todos, Lunes..Domingo y Sin día. */
+export function buildRuteroWorkbook(groups: Map<string, RuteroRow[]>): Buffer {
   const workbook = XLSX.utils.book_new();
   const phoneCol = HEADERS.indexOf('Teléfono');
   const taxCol = HEADERS.indexOf('NIT');
 
   const allRows: (string | number)[][] = [];
-  for (const [name, rows] of groups) {
-    rows.forEach((row, i) => allRows.push([name, ...rowCells(row, i)]));
+  for (const name of RUTERO_GROUPS) {
+    (groups.get(name) ?? []).forEach((row, i) => allRows.push([name, ...rowCells(row, i)]));
   }
   XLSX.utils.book_append_sheet(
     workbook,
@@ -171,10 +207,10 @@ export function buildRuteroWorkbook(customers: RuteroCustomer[], orders: RuteroO
     ALL_SHEET,
   );
 
-  for (const [name, rows] of groups) {
+  for (const name of RUTERO_GROUPS) {
     XLSX.utils.book_append_sheet(
       workbook,
-      buildSheet(HEADERS, WIDTHS, rows.map(rowCells), [phoneCol, taxCol]),
+      buildSheet(HEADERS, WIDTHS, (groups.get(name) ?? []).map(rowCells), [phoneCol, taxCol]),
       name,
     );
   }

@@ -4,6 +4,7 @@ import {
   Post, 
   Body, 
   Patch, 
+  Put,
   Param, 
   Delete, 
   Query,
@@ -31,6 +32,8 @@ import { CustomerAddress } from './entities/customer-address.entity';
 import { ApiTags, ApiBearerAuth, ApiOperation, ApiResponse, ApiQuery, ApiParam, ApiProduces } from '@nestjs/swagger';
 import { CustomerResponseDto } from './dto/customer-response.dto';
 import { PaginatedCustomerResponseDto } from './dto/paginated-customer-response.dto';
+import { SaveRuteroPlanDto } from './dto/save-rutero-plan.dto';
+import { RuteroPlanResponse } from './dto/rutero-plan-response.dto';
 
 @ApiTags('Customers')
 @ApiBearerAuth('access-token')
@@ -72,23 +75,55 @@ export class CustomersController {
   @ApiOperation({
     summary: 'Descargar rutero de clientes activos en Excel',
     description:
-      'Hojas: Todos, Lunes..Domingo y Sin pedidos. El día es el día de la semana (hora Bogotá) con más pedidos no cancelados; ' +
-      'en empate, el del pedido más reciente. El orden de visita (#) sigue la hora habitual de los pedidos del cliente en ese día.',
+      'Hojas: Todos, Lunes..Domingo y Sin día. Usa el día y orden guardados en el editor; los clientes sin guardar usan la sugerencia: ' +
+      'día de la semana (hora Bogotá) con más pedidos no cancelados (empate: el más reciente) y orden por hora habitual.',
   })
   @ApiProduces('application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
   @ApiResponse({ status: 200, description: 'Archivo .xlsx del rutero' })
   @ApiResponse({ status: 401, description: 'No autenticado' })
   @ApiResponse({ status: 403, description: 'Rol no permitido' })
-  async downloadRutero(
-    @GetUser() user: User,
-    @Res({ passthrough: true }) res: Response,
-  ): Promise<StreamableFile> {
-    const { buffer, filename } = await this.customersService.getRutero(user);
+  async downloadRutero(@Res({ passthrough: true }) res: Response): Promise<StreamableFile> {
+    const { buffer, filename } = await this.customersService.getRutero();
     res.set({
       'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       'Content-Disposition': `attachment; filename="${filename}"`,
     });
     return new StreamableFile(buffer);
+  }
+
+  @Get('rutero/plan')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SELLER)
+  @ApiOperation({
+    summary: 'Obtener el rutero editable (día y orden de visita por cliente)',
+    description: 'Clientes sin día/orden guardado aparecen con la sugerencia calculada desde sus pedidos (isSuggested = true).',
+  })
+  @ApiResponse({ status: 200, description: 'Rutero por día', type: RuteroPlanResponse })
+  async getRuteroPlan(): Promise<RuteroPlanResponse> {
+    return this.customersService.getRuteroPlan();
+  }
+
+  @Put('rutero/plan')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SELLER)
+  @ApiOperation({ summary: 'Guardar el rutero completo (reemplaza el anterior)' })
+  @ApiResponse({ status: 200, description: 'Rutero guardado', type: RuteroPlanResponse })
+  @ApiResponse({ status: 400, description: 'Clientes duplicados, inexistentes o inactivos' })
+  @ApiResponse({ status: 409, description: 'Otra persona guardó el rutero después de cargarlo' })
+  async saveRuteroPlan(
+    @Body() dto: SaveRuteroPlanDto,
+    @GetUser() user: User,
+  ): Promise<RuteroPlanResponse> {
+    return this.customersService.saveRuteroPlan(dto, user);
+  }
+
+  @Delete('rutero/plan')
+  @UseGuards(RolesGuard)
+  @Roles(UserRole.ADMIN, UserRole.SELLER)
+  @ApiOperation({ summary: 'Restablecer el rutero a la sugerencia calculada por pedidos' })
+  @ApiResponse({ status: 200, description: 'Rutero restablecido', type: RuteroPlanResponse })
+  async resetRuteroPlan(): Promise<RuteroPlanResponse> {
+    return this.customersService.resetRuteroPlan();
   }
 
   @Get(':id')
